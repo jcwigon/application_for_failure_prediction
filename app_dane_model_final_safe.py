@@ -15,7 +15,7 @@ st.info("Ta aplikacja wykorzystuje model ML do przewidywania awarii maszyn na po
 model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
 
 # 📊 Wczytaj dane do predykcji
-df = pd.read_csv("dane_predykcja_model.csv")
+df = pd.read_csv("dane_predykcja_model.n.csv.gz", compression='gzip')
 df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
 
 # 🧾 Przygotuj dane
