@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import joblib
@@ -8,7 +7,7 @@ from io import BytesIO
 st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
 
 # 🧠 Tytuł i opis
-st.title("🛠 Predykcja awarii – 3 dni do przodu")
+st.title("🛠 Predykcja awarii – 1 dzień do przodu")
 st.info("Ta aplikacja wykorzystuje model ML do przewidywania awarii maszyn na podstawie danych historycznych.")
 
 # 📦 Wczytaj model
@@ -19,10 +18,10 @@ df = pd.read_csv("dane_predykcja_model.csv")
 df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
 
 # 🧾 Przygotuj dane
-features = ['awarie_7dni', 'dni_od_ostatniej_awarii', 'zmiana', 'Linia', 'Stacja']
-df_encoded = pd.get_dummies(df[features], drop_first=True)
+features = ['awarie_7dni', 'dni_od_ostatniej_awarii', 'Stacja']
+df_encoded = pd.get_dummies(df[features], drop_first=False)
 
-# 🔄 Upewnij się, że kolumny są zgodne z modelem
+# 🔄 Upewnij się, że kolumny pasują do modelu
 expected_cols = model.feature_name_
 for col in expected_cols:
     if col not in df_encoded.columns:
@@ -43,15 +42,15 @@ st.subheader("📋 Lista stacji z predykcją")
 
 # Filtry
 unikalne_daty = sorted(df['data_dzienna'].unique())
-unikalne_linie = sorted(df['Linia'].unique())
+unikalne_stacje = sorted(df['Stacja'].unique())
 
 wybrana_data = st.selectbox("📅 Wybierz dzień", unikalne_daty)
-wybrana_linia = st.selectbox("🏭 Wybierz linię", ["Wszystkie"] + unikalne_linie)
+wybrana_stacja = st.selectbox("🏭 Wybierz stację", ["Wszystkie"] + unikalne_stacje)
 
 # Filtrowanie
 df_filtered = df[df['data_dzienna'] == pd.to_datetime(wybrana_data)]
-if wybrana_linia != "Wszystkie":
-    df_filtered = df_filtered[df_filtered['Linia'] == wybrana_linia]
+if wybrana_stacja != "Wszystkie":
+    df_filtered = df_filtered[df_filtered['Stacja'] == wybrana_stacja]
 
 # 📊 Metryka
 liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
@@ -59,8 +58,7 @@ st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
 
 # Tabela z kolorem
 st.dataframe(
-    df_filtered[['data_dzienna', 'Linia', 'Stacja', 'Predykcja awarii']]
-    .sort_values(by='Predykcja awarii', ascending=False),
+    df_filtered[['data_dzienna', 'Stacja', 'Predykcja awarii']].sort_values(by='Predykcja awarii', ascending=False),
     use_container_width=True
 )
 
