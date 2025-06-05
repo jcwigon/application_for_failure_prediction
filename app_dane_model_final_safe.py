@@ -17,37 +17,51 @@ model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
 df = pd.read_csv("dane_predykcja_1dzien.csv")
 df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
 
-# 🤖 Przygotuj predykcję
-X = df[['Stacja']]
+# 🔄 Przygotuj dane wejściowe do predykcji
+X = pd.get_dummies(df[['Stacja']], drop_first=False)
+
+# Dodaj brakujące kolumny zgodnie z modelem
+for col in model.feature_name_:
+    if col not in X.columns:
+        X[col] = 0
+
+# Ustaw kolejność kolumn jak w modelu
+X = X[model.feature_name_]
+
+# 🧠 Predykcja
 df['Predykcja awarii'] = model.predict(X)
 df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
 
-# 📅 Stały wybór – „Jutro”
+# 🎚️ Interfejs użytkownika
 st.subheader("📋 Lista stacji z predykcją")
-st.selectbox("📅 Dzień", ["Jutro"])
 
-# 🏭 Filtracja linii (pełna lista z danych)
-unikalne_linie = sorted(df['Stacja'].str.extract(r"^(DB\d{2})")[0].dropna().unique())
-wybrana_linia = st.selectbox("🏭 Wybierz linię", unikalne_linie)
+# ➤ Wybór tylko 1 daty – "jutro"
+ostatnia_data = df['data_dzienna'].max()
+wybrana_data = st.selectbox("📅 Dzień", options=[ostatnia_data], format_func=lambda x: "Jutro")
 
-# 🔍 Filtrowanie stacji
-df_filtered = df[df['Stacja'].str.startswith(wybrana_linia)].copy()
+# ➤ Lista unikalnych linii
+linie = sorted(df['Linia'].unique())
+wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
 
-# 🔢 Dodaj numerację od 1
+# ➤ Filtrowanie
+df_filtered = df[(df['data_dzienna'] == wybrana_data) & (df['Linia'] == wybrana_linia)].copy()
+
+# ➤ Dodaj kolumnę LP
 df_filtered.reset_index(drop=True, inplace=True)
 df_filtered.index += 1
+df_filtered.insert(0, "LP", df_filtered.index)
 
-# 📋 Tabela
-df_filtered = df_filtered.rename(columns={"data_dzienna": "Dzień"})
+# ➤ Tabela
 st.dataframe(
-    df_filtered[['Dzień', 'Stacja', 'Predykcja awarii']],
+    df_filtered[['LP', 'data_dzienna', 'Linia', 'Stacja', 'Predykcja awarii']]
+    .sort_values(by='Stacja'),
     use_container_width=True
 )
 
-# 📁 Eksport CSV
+# 💾 Eksport CSV
 st.download_button(
     label="⬇️ Pobierz dane do CSV",
-    data=df_filtered.to_csv(index_label="Lp.", encoding="utf-8").encode('utf-8'),
-    file_name="predykcja_awarii_jutro.csv",
+    data=df_filtered.to_csv(index=False).encode('utf-8'),
+    file_name="predykcja_1dzien.csv",
     mime="text/csv"
 )
