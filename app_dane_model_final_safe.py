@@ -16,7 +16,6 @@ df = pd.read_csv("dane_predykcja_1dzien.csv")
 df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
 
 # 🧾 Przygotowanie cech
-df["awarie_7dni"] = df["awarie_7dni"].astype(int)
 df["dni_od_ostatniej_awarii"] = df["dni_od_ostatniej_awarii"].astype(int)
 df["zmiana"] = df["zmiana"].astype(str)
 
