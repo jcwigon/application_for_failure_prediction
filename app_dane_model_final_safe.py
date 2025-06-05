@@ -1,61 +1,53 @@
 import streamlit as st
 import pandas as pd
 import joblib
+from io import BytesIO
 
-# Konfiguracja strony
-st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
+# 🎛️ Konfiguracja strony
+st.set_page_config(page_title="Predykcja awarii – 1 dzień do przodu", page_icon="🛠", layout="wide")
 
-# Tytuł i opis
+# 🧠 Tytuł i opis
 st.title("🛠 Predykcja awarii – 1 dzień do przodu")
 st.info("Aplikacja przewiduje awarie maszyn na podstawie danych z przeszłości.")
 
-# Wczytaj model
+# 📦 Wczytaj model
 model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
 
-# Wczytaj dane predykcyjne
+# 📊 Wczytaj dane
 df = pd.read_csv("dane_predykcja_1dzien.csv")
 df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
 
-# Zakoduj dane wejściowe zgodnie z modelem
-X = pd.get_dummies(df[['Stacja']])
-for col in model.feature_name_:
-    if col not in X.columns:
-        X[col] = 0
-X = X[model.feature_name_]
-
-# Predykcja
+# 🤖 Przygotuj predykcję
+X = df[['Stacja']]
 df['Predykcja awarii'] = model.predict(X)
 df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
 
-# Wydzielenie informacji o linii z nazwy stacji
-df['Linia'] = df['Stacja'].str.extract(r'^(DB\d{2})')
+# 📅 Stały wybór – „Jutro”
+st.subheader("📋 Lista stacji z predykcją")
+st.selectbox("📅 Dzień", ["Jutro"])
 
-# Lista dostępnych dni i linii
-unikalne_daty = sorted(df['data_dzienna'].unique())
-unikalne_linie = sorted(df['Linia'].dropna().unique())
-
-# Filtry użytkownika
-wybrana_data = st.selectbox("📅 Wybierz dzień", unikalne_daty)
+# 🏭 Filtracja linii (pełna lista z danych)
+unikalne_linie = sorted(df['Stacja'].str.extract(r"^(DB\d{2})")[0].dropna().unique())
 wybrana_linia = st.selectbox("🏭 Wybierz linię", unikalne_linie)
 
-# Filtrowanie danych
-df_filtered = df[(df['data_dzienna'] == wybrana_data) & (df['Linia'] == wybrana_linia)]
+# 🔍 Filtrowanie stacji
+df_filtered = df[df['Stacja'].str.startswith(wybrana_linia)].copy()
 
-# Liczba awarii
-liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
-st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
+# 🔢 Dodaj numerację od 1
+df_filtered.reset_index(drop=True, inplace=True)
+df_filtered.index += 1
 
-# Tabela wyników
+# 📋 Tabela
+df_filtered = df_filtered.rename(columns={"data_dzienna": "Dzień"})
 st.dataframe(
-    df_filtered[['data_dzienna', 'Linia', 'Stacja', 'Predykcja awarii']]
-    .sort_values(by='Predykcja awarii', ascending=False),
+    df_filtered[['Dzień', 'Stacja', 'Predykcja awarii']],
     use_container_width=True
 )
 
-# Eksport CSV
+# 📁 Eksport CSV
 st.download_button(
     label="⬇️ Pobierz dane do CSV",
-    data=df_filtered.to_csv(index=False).encode('utf-8'),
-    file_name="predykcja_1dzien.csv",
+    data=df_filtered.to_csv(index_label="Lp.", encoding="utf-8").encode('utf-8'),
+    file_name="predykcja_awarii_jutro.csv",
     mime="text/csv"
 )
