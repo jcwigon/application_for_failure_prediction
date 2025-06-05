@@ -15,20 +15,16 @@ model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
 df = pd.read_csv("dane_predykcja_1dzien.csv")
 df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
 
-# 🧾 Przygotowanie cech
-df["dni_od_ostatniej_awarii"] = df["dni_od_ostatniej_awarii"].astype(int)
-df["zmiana"] = df["zmiana"].astype(str)
-
-X = pd.get_dummies(df[["awarie_7dni", "dni_od_ostatniej_awarii", "zmiana"]], drop_first=True)
+# 🧾 Przygotowanie danych do predykcji
+X = pd.get_dummies(df[["Stacja"]], drop_first=True)
 
 # 🔮 Predykcja
 df["Predykcja awarii"] = model.predict(X)
 df["Predykcja awarii"] = df["Predykcja awarii"].map({0: "🟢 Brak", 1: "🔴 Będzie"})
 
 # 📆 Ustal dzień jutro
-ostatnia_data = df["data_dzienna"].max()
 st.subheader("📋 Lista stacji z predykcją")
-st.markdown(f"**Dzień:** Jutro")
+st.markdown("**Dzień:** Jutro")
 
 # 📍 Filtr linii
 unikalne_linie = sorted(df["Linia"].unique())
@@ -72,5 +68,4 @@ st.download_button(
     file_name="predykcja_1dzien.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
-
 
