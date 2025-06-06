@@ -51,11 +51,8 @@ df_filtered.insert(0, "Lp.", range(1, len(df_filtered) + 1))
 liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
 st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
 
-# 📊 Tabela wyników – bez indeksu
-st.dataframe(
-    df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']].style.hide(axis="index"),
-    use_container_width=True
-)
+# 📊 Tabela wyników – BEZ indeksu
+st.table(df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']])
 
 # 💾 Eksport CSV
 st.download_button(
