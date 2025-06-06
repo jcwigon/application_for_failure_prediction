@@ -51,9 +51,10 @@ df_filtered.insert(0, "Lp.", range(1, len(df_filtered) + 1))
 liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
 st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
 
-# 📊 Tabela wyników – bez indeksu
-st.table(
-    df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']]
+# 📊 Tabela wyników
+st.dataframe(
+    df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']].reset_index(drop=True),
+    use_container_width=True
 )
 
 # 💾 Eksport CSV
@@ -77,6 +78,4 @@ st.download_button(
     file_name="predykcja_1dzien.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
-
-
 
