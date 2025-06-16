@@ -1,81 +1,83 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import re
 from io import BytesIO
 
-st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
+st.set_page_config(page_title="Predykcja awarii + Konwerter", page_icon="🛠", layout="wide")
 
-st.title("🛠 Predykcja awarii – 1 dzień do przodu")
-st.info("Aplikacja przewiduje, czy jutro wystąpi awaria na stacji, na podstawie danych historycznych.")
+st.title("🛠 Predykcja awarii – z konwerterem pliku Excel")
+st.info("Wgraj plik **DispatchHistory--*.xlsx**, aplikacja go przekształci i przewidzi awarie.")
 
-# 📦 Wczytaj model
+# 📦 Wczytaj model predykcji
 model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
 
-# 📊 Wczytaj dane
-df = pd.read_csv("dane_predykcja_1dzien.csv")
-df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
+def extract_date_from_filename(filename):
+    match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', filename)
+    return match.group(1) if match else None
 
-# ⏳ Dzień jutro – tylko jako tekst
-st.markdown(f"**Dzień:** Jutro")
+def convert_excel_to_model_input(file, filename):
+    # Wczytaj Excel
+    df = pd.read_excel(file)
 
-# 📍 Filtr linii
-linie = sorted(df['Stacja'].str.extract(r'(^[A-Z]{2,}[0-9]{2,})')[0].dropna().unique())
-wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
+    # Sprawdzenie wymaganych kolumn
+    required_cols = ['machinecode', 'linecode']
+    for col in required_cols:
+        if col not in df.columns:
+            st.error(f"Brak wymaganej kolumny '{col}' w pliku.")
+            return None
 
-# 🔢 Przygotowanie danych
-X = df[['Stacja']].copy()
-X['Stacja'] = X['Stacja'].astype(str)
-X_encoded = pd.get_dummies(X, drop_first=False)
+    # Parsowanie daty z nazwy pliku
+    data_dzienna = extract_date_from_filename(filename)
+    if not data_dzienna:
+        st.error("Nie udało się wyciągnąć daty z nazwy pliku. Upewnij się, że plik ma nazwę np. DispatchHistory--2025-05-26.xlsx")
+        return None
 
-# 🧠 Predykcja
-df['Predykcja awarii'] = model.predict(X_encoded)
-df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
+    # Filtrowanie rekordów poprawnych
+    df = df.dropna(subset=['machinecode', 'linecode'])
 
-# 🔍 Filtrowanie tylko dla jutra i wybranej linii
-data_jutra = df['data_dzienna'].max()
-df_filtered = df[df['data_dzienna'] == data_jutra].copy()
-df_filtered = df_filtered[df_filtered['Stacja'].str.startswith(wybrana_linia)]
+    # Budujemy unikalne zgłoszenia awarii
+    df_awarie = df[['machinecode', 'linecode']].drop_duplicates()
+    df_awarie = df_awarie.rename(columns={
+        'machinecode': 'Stacja',
+        'linecode': 'Linia'
+    })
+    df_awarie['data_dzienna'] = data_dzienna
+    df_awarie['czy_wystapila_awaria'] = 1
 
-# 🧹 Usuń duplikaty stacji
-df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
+    return df_awarie[['data_dzienna', 'Stacja', 'Linia', 'czy_wystapila_awaria']]
 
-# 🧾 Dodaj kolumnę Linia
-if 'Linia' in df_filtered.columns:
-    df_filtered.drop(columns=['Linia'], inplace=True)
-df_filtered.insert(1, "Linia", wybrana_linia)
+uploaded_file = st.file_uploader("📤 Wgraj plik Excel (DispatchHistory--*.xlsx)", type=['xlsx'])
 
-# 🔢 Dodaj Lp
-df_filtered.insert(0, "Lp.", range(1, len(df_filtered) + 1))
+if uploaded_file is not None:
+    with st.spinner("⏳ Przetwarzanie pliku..."):
+        converted_df = convert_excel_to_model_input(uploaded_file, uploaded_file.name)
 
-# 📋 Wyświetl metrykę
-liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
-st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
+        if converted_df is not None:
+            st.success("✅ Plik poprawnie przekształcony. Oto dane wejściowe dla modelu:")
+            st.dataframe(converted_df)
 
-# 📊 Tabela wyników
-st.dataframe(
-    df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']].reset_index(drop=True),
-    use_container_width=True
-)
+            # 📊 Predykcja
+            X_pred = converted_df[['data_dzienna', 'Stacja', 'Linia']]
+            # Kodowanie cech (jeśli model tego wymaga - np. one-hot lub label encoding)
+            # UWAGA: Musisz dopasować poniżej do sposobu trenowania modelu
+            # Poniżej zakładam, że model oczekuje tylko zakodowanej kolumny 'Stacja'
 
-# 💾 Eksport CSV
-st.download_button(
-    label="⬇️ Pobierz dane do CSV",
-    data=df_filtered.to_csv(index=False).encode('utf-8'),
-    file_name="predykcja_1dzien.csv",
-    mime="text/csv"
-)
+            # Przygotowanie danych do predykcji – placeholder (dopasuj do swojego modelu)
+            X_pred_encoded = pd.get_dummies(X_pred['Stacja'])  # przykład – zmień według potrzeb
+            missing_cols = [col for col in model.feature_names_in_ if col not in X_pred_encoded.columns]
+            for col in missing_cols:
+                X_pred_encoded[col] = 0
+            X_pred_encoded = X_pred_encoded[model.feature_names_in_]
 
-# 💾 Eksport XLSX
-def convert_df_to_excel_bytes(df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name="Predykcja")
-    return output.getvalue()
+            y_pred = model.predict(X_pred_encoded)
 
-st.download_button(
-    label="⬇️ Pobierz dane do Excel (XLSX)",
-    data=convert_df_to_excel_bytes(df_filtered),
-    file_name="predykcja_1dzien.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
+            converted_df['Predykcja_awarii'] = y_pred
+            st.subheader("🔎 Wynik predykcji")
+            st.dataframe(converted_df)
+
+            # 📥 Pobranie wyniku jako CSV
+            csv = converted_df.to_csv(index=False).encode('utf-8')
+            st.download_button("⬇️ Pobierz wynik jako CSV", data=csv, file_name="wynik_predykcji.csv", mime='text/csv')
+
 
