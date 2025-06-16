@@ -13,7 +13,7 @@ st.info("Aplikacja przewiduje, czy jutro wystąpi awaria na stacji.")
 try:
     model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
     if hasattr(model, 'feature_names_in_'):
-        expected_stations = set(model.feature_names_in_)
+        expected_features = model.feature_names_in_
 except Exception as e:
     st.error(f"Błąd podczas wczytywania modelu: {str(e)}")
     st.stop()
@@ -22,17 +22,8 @@ def convert_dispatch_to_model_format(uploaded_file):
     """Konwertuje plik DispatchHistory do odpowiedniego formatu"""
     try:
         # Wczytaj plik z różnymi separatorami
-        for sep in [';', ',', '\t']:
-            try:
-                df = pd.read_csv(uploaded_file, sep=sep, encoding='utf-8')
-                if len(df.columns) > 1:
-                    break
-            except:
-                continue
-        else:
-            st.error("Nie można odczytać pliku - sprawdź separator (powinien być ; , lub tab)")
-            return None
-
+        df = pd.read_csv(uploaded_file, sep=None, engine='python', encoding='utf-8')
+        
         # Sprawdź wymagane kolumny
         df.columns = df.columns.str.strip().str.lower()
         if 'machinecode' not in df.columns or 'linecode' not in df.columns:
@@ -47,19 +38,15 @@ def convert_dispatch_to_model_format(uploaded_file):
         date_match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', uploaded_file.name)
         data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else pd.Timestamp.now() + pd.Timedelta(days=1)
         
-        # Stwórz pełny zestaw danych (1 dla awarii, 0 dla braku)
-        all_stations = expected_stations if hasattr(model, 'feature_names_in_') else set(df['Stacja'].unique())
-        stations_with_failure = set(df['Stacja'].unique())
-        
+        # Stwórz pełny zestaw danych
         result = []
-        for station in all_stations:
-            # Znajdź linię dla stacji (jeśli istnieje w danych)
-            line = df[df['Stacja'] == station]['Linia'].iloc[0] if station in df['Stacja'].values else station[:4]
+        for station in df['Stacja'].unique():
+            line = df[df['Stacja'] == station]['Linia'].iloc[0] if not df[df['Stacja'] == station].empty else station[:4]
             result.append({
                 'Stacja': station,
                 'Linia': line,
                 'data_dzienna': data_dzienna,
-                'czy_wystapila_awaria': 1 if station in stations_with_failure else 0
+                'czy_wystapila_awaria': 1  # Zakładamy, że wszystkie w pliku to awarie
             })
         
         return pd.DataFrame(result)
@@ -72,20 +59,19 @@ def convert_dispatch_to_model_format(uploaded_file):
 data_source = st.radio("Wybierz źródło danych:", ["Domyślne dane", "Wgraj plik DispatchHistory"])
 
 if data_source == "Domyślne dane":
-    # Użyj oryginalnego kodu z domyślnymi danymi
     try:
         df = pd.read_csv("dane_predykcja_1dzien.csv")
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
         df = df[df['data_dzienna'] == df['data_dzienna'].max()]
         
-        st.markdown(f"**Dzień:** Jutro")
+        st.markdown(f"**Dzień:** {df['data_dzienna'].iloc[0].strftime('%Y-%m-%d')}")
         
         linie = sorted(df['Linia'].dropna().unique())
         wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
         
-        X = df[['Stacja']].copy()
-        X['Stacja'] = X['Stacja'].astype(str)
-        X_encoded = pd.get_dummies(X, drop_first=False)
+        # Przygotowanie danych dla modelu
+        X = pd.DataFrame({'Stacja': df['Stacja'].unique()})
+        X_encoded = pd.get_dummies(X, columns=['Stacja'])
         
         # Dopasuj kolumny do wymagań modelu
         if hasattr(model, 'feature_names_in_'):
@@ -94,14 +80,15 @@ if data_source == "Domyślne dane":
                 X_encoded[col] = 0
             X_encoded = X_encoded[model.feature_names_in_]
         
-        df['Predykcja awarii'] = model.predict(X_encoded)
-        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
+        # Wykonaj predykcję
+        predictions = model.predict(X_encoded)
+        pred_dict = dict(zip(X['Stacja'], predictions))
         
-        # Bezpieczne filtrowanie
+        df['Predykcja awarii'] = df['Stacja'].map(pred_dict).map({0: "🟢 Brak", 1: "🔴 Będzie"})
+        
+        # Filtruj i wyświetl
         df_filtered = df[df['Linia'] == wybrana_linia].copy()
         df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
-        
-        # Dodaj numerację
         df_filtered.insert(0, "Lp.", range(1, len(df_filtered)+1))
         
     except Exception as e:
@@ -117,22 +104,16 @@ else:
         if df is None:
             st.stop()
             
-        st.markdown(f"**Dzień:** Jutro ({df['data_dzienna'].iloc[0].strftime('%Y-%m-%d')})")
+        st.markdown(f"**Dzień:** {df['data_dzienna'].iloc[0].strftime('%Y-%m-%d')}")
         
-        # Pokaż wszystkie dostępne linie
         linie = sorted(df['Linia'].dropna().unique())
-        if not linie:
-            st.error("Nie znaleziono żadnych linii w danych!")
-            st.stop()
-            
         wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
         
-        # Przygotuj dane do predykcji
-        X = df[['Stacja']].copy()
-        X['Stacja'] = X['Stacja'].astype(str)
-        X_encoded = pd.get_dummies(X['Stacja'])
+        # Przygotowanie danych dla modelu
+        X = pd.DataFrame({'Stacja': df['Stacja'].unique()})
+        X_encoded = pd.get_dummies(X, columns=['Stacja'])
         
-        # Dopasuj do wymagań modelu
+        # Dopasuj kolumny do wymagań modelu
         if hasattr(model, 'feature_names_in_'):
             missing_cols = set(model.feature_names_in_) - set(X_encoded.columns)
             for col in missing_cols:
@@ -140,17 +121,17 @@ else:
             X_encoded = X_encoded[model.feature_names_in_]
         
         # Wykonaj predykcję
-        df['Predykcja awarii'] = model.predict(X_encoded)
-        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
+        predictions = model.predict(X_encoded)
+        pred_dict = dict(zip(X['Stacja'], predictions))
         
-        # Bezpieczne filtrowanie - teraz po kolumnie Linia zamiast startswith
+        df['Predykcja awarii'] = df['Stacja'].map(pred_dict).map({0: "🟢 Brak", 1: "🔴 Będzie"})
+        
+        # Filtruj i wyświetl
         df_filtered = df[df['Linia'] == wybrana_linia].copy()
         df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
-        
-        # Dodaj numerację
         df_filtered.insert(0, "Lp.", range(1, len(df_filtered)+1))
 
-# Wyświetl wyniki (wspólne dla obu ścieżek)
+# Wyświetl wyniki
 if 'df_filtered' in locals():
     # 📋 Wyświetl metrykę
     liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
@@ -159,7 +140,8 @@ if 'df_filtered' in locals():
     # 📊 Tabela wyników
     st.dataframe(
         df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']],
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True
     )
     
     # 💾 Eksport danych
