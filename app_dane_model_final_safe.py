@@ -7,7 +7,7 @@ from io import BytesIO
 st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
 
 st.title("🛠 Predykcja awarii – 1 dzień do przodu")
-st.info("Wgraj plik DispatchHistory--*.csv, aplikacja go przekształci i przewidzi awarie.")
+st.info("Aplikacja przewiduje, czy jutro wystąpi awaria na stacji. Użyj domyślnych danych lub wgraj własny plik CSV.")
 
 # 📦 Wczytaj model
 try:
@@ -74,82 +74,116 @@ def convert_csv_to_model_input(file, filename):
         st.error(f"Błąd podczas przetwarzania pliku: {str(e)}")
         return None
 
-# UI do przesyłania plików
-uploaded_file = st.file_uploader("📤 Wgraj plik CSV (DispatchHistory--*.csv)", type=['csv'])
+def prepare_prediction_data(df):
+    # 🔢 Przygotowanie danych
+    X = df[['Stacja']].copy()
+    X['Stacja'] = X['Stacja'].astype(str)
+    X_encoded = pd.get_dummies(X['Stacja'])
+    
+    # Upewnij się, że mamy wszystkie wymagane kolumny
+    if hasattr(model, 'feature_names_in_'):
+        missing_cols = set(model.feature_names_in_) - set(X_encoded.columns)
+        for col in missing_cols:
+            X_encoded[col] = 0
+        X_encoded = X_encoded[model.feature_names_in_]
+    
+    # 🧠 Predykcja
+    df['Predykcja awarii'] = model.predict(X_encoded)
+    df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
+    
+    return df
 
-if uploaded_file is not None:
-    with st.spinner("⏳ Przetwarzanie pliku..."):
-        converted_df = convert_csv_to_model_input(uploaded_file, uploaded_file.name)
+def display_results(df, wybrana_linia):
+    # 🔍 Filtrowanie tylko dla wybranej linii
+    df_filtered = df[df['Linia'] == wybrana_linia].copy()
+    
+    # 🧹 Usuń duplikaty stacji
+    df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
+    
+    # 🔢 Dodaj Lp
+    df_filtered.insert(0, "Lp.", range(1, len(df_filtered) + 1))
+    
+    # 📋 Wyświetl metrykę
+    liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
+    st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
+    
+    # 📊 Tabela wyników
+    st.dataframe(
+        df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']].reset_index(drop=True),
+        use_container_width=True
+    )
+    
+    # 💾 Eksport CSV
+    st.download_button(
+        label="⬇️ Pobierz dane do CSV",
+        data=df_filtered.to_csv(index=False).encode('utf-8'),
+        file_name="predykcja_1dzien.csv",
+        mime="text/csv"
+    )
+    
+    # 💾 Eksport XLSX
+    def convert_df_to_excel_bytes(df):
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name="Predykcja")
+        return output.getvalue()
+    
+    st.download_button(
+        label="⬇️ Pobierz dane do Excel (XLSX)",
+        data=convert_df_to_excel_bytes(df_filtered),
+        file_name="predykcja_1dzien.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-        if converted_df is not None:
-            st.success("✅ Plik poprawnie przekształcony")
+# UI do wyboru źródła danych
+data_source = st.radio("Wybierz źródło danych:", ["Domyślne dane", "Wgraj własny plik"])
+
+if data_source == "Domyślne dane":
+    try:
+        # 📊 Wczytaj domyślne dane
+        df = pd.read_csv("dane_predykcja_1dzien.csv")
+        df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
+        
+        # Użyj najnowszej daty z danych
+        data_jutra = df['data_dzienna'].max()
+        df = df[df['data_dzienna'] == data_jutra]
+        
+        # ⏳ Dzień jutro – tylko jako tekst
+        st.markdown(f"**Dzień:** Jutro ({data_jutra.strftime('%Y-%m-%d')})")
+        
+        # Przygotuj dane do predykcji
+        df = prepare_prediction_data(df)
+        
+        # 📍 Filtr linii
+        linie = sorted(df['Linia'].unique())
+        wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
+        
+        # Wyświetl wyniki
+        display_results(df, wybrana_linia)
+        
+    except Exception as e:
+        st.error(f"Błąd podczas wczytywania domyślnych danych: {str(e)}")
+
+else:
+    # UI do przesyłania plików
+    uploaded_file = st.file_uploader("📤 Wgraj plik CSV (DispatchHistory--*.csv)", type=['csv'])
+    
+    if uploaded_file is not None:
+        with st.spinner("⏳ Przetwarzanie pliku..."):
+            converted_df = convert_csv_to_model_input(uploaded_file, uploaded_file.name)
             
-            # ⏳ Dzień jutro – tylko jako tekst
-            st.markdown(f"**Dzień:** Jutro")
-
-            # 📍 Filtr linii
-            linie = sorted(converted_df['Linia'].unique())
-            wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
-
-            # 🔢 Przygotowanie danych
-            X = converted_df[['Stacja']].copy()
-            
-            # Kodowanie cech - musi być zgodne z tym, czego oczekuje model
-            X_encoded = pd.get_dummies(X['Stacja'])
-            
-            # Upewnij się, że mamy wszystkie wymagane kolumny
-            if hasattr(model, 'feature_names_in_'):
-                missing_cols = set(model.feature_names_in_) - set(X_encoded.columns)
-                for col in missing_cols:
-                    X_encoded[col] = 0
-                X_encoded = X_encoded[model.feature_names_in_]
-            
-            try:
-                # 🧠 Predykcja
-                converted_df['Predykcja awarii'] = model.predict(X_encoded)
-                converted_df['Predykcja awarii'] = converted_df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
-
-                # 🔍 Filtrowanie tylko dla wybranej linii
-                df_filtered = converted_df[converted_df['Linia'] == wybrana_linia].copy()
-
-                # 🧹 Usuń duplikaty stacji
-                df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
-
-                # 🔢 Dodaj Lp
-                df_filtered.insert(0, "Lp.", range(1, len(df_filtered) + 1))
-
-                # 📋 Wyświetl metrykę
-                liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
-                st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
-
-                # 📊 Tabela wyników
-                st.dataframe(
-                    df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']].reset_index(drop=True),
-                    use_container_width=True
-                )
-
-                # 💾 Eksport CSV
-                st.download_button(
-                    label="⬇️ Pobierz dane do CSV",
-                    data=df_filtered.to_csv(index=False).encode('utf-8'),
-                    file_name="predykcja_1dzien.csv",
-                    mime="text/csv"
-                )
-
-                # 💾 Eksport XLSX
-                def convert_df_to_excel_bytes(df):
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        df.to_excel(writer, index=False, sheet_name="Predykcja")
-                    return output.getvalue()
-
-                st.download_button(
-                    label="⬇️ Pobierz dane do Excel (XLSX)",
-                    data=convert_df_to_excel_bytes(df_filtered),
-                    file_name="predykcja_1dzien.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            
-            except Exception as e:
-                st.error(f"Błąd podczas predykcji: {str(e)}")
-                st.error("Upewnij się, że model jest kompatybilny z danymi wejściowymi")
+            if converted_df is not None:
+                st.success("✅ Plik poprawnie przekształcony")
+                
+                # ⏳ Dzień jutro – tylko jako tekst
+                st.markdown(f"**Dzień:** Jutro ({converted_df['data_dzienna'].iloc[0].strftime('%Y-%m-%d')})")
+                
+                # Przygotuj dane do predykcji
+                df_pred = prepare_prediction_data(converted_df)
+                
+                # 📍 Filtr linii
+                linie = sorted(df_pred['Linia'].unique())
+                wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
+                
+                # Wyświetl wyniki
+                display_results(df_pred, wybrana_linia)
