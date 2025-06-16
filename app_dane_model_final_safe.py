@@ -7,183 +7,102 @@ from io import BytesIO
 st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
 
 st.title("🛠 Predykcja awarii – 1 dzień do przodu")
-st.info("Aplikacja przewiduje, czy jutro wystąpi awaria na stacji. Użyj domyślnych danych lub wgraj własny plik CSV.")
+st.info("Aplikacja przewiduje, czy jutro wystąpi awaria na stacji.")
 
 # 📦 Wczytaj model
 try:
     model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
+    # Pobierz listę stacji, których oczekuje model (jeśli dostępna)
+    if hasattr(model, 'feature_names_in_'):
+        expected_stations = set(model.feature_names_in_)
 except Exception as e:
     st.error(f"Błąd podczas wczytywania modelu: {str(e)}")
     st.stop()
 
-def extract_date_from_filename(filename):
-    match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', filename)
-    return match.group(1) if match else None
-
-def convert_csv_to_model_input(file, filename):
+def process_uploaded_file(uploaded_file):
     try:
-        # Wczytaj CSV z różnymi opcjami kodowania i separatorami
-        for encoding in ['utf-8', 'latin1', 'cp1250']:
-            try:
-                file.seek(0)
-                df = pd.read_csv(file, header=0, encoding=encoding, sep=';')
-                if len(df.columns) > 1:
-                    break
-            except:
-                continue
-        else:
-            st.error("Nie można odczytać pliku - problem z kodowaniem znaków lub separatorem")
-            return None
-
-        # Sprawdzenie wymaganych kolumn
-        df.columns = df.columns.str.strip().str.lower()
+        # Wczytaj CSV
+        df = pd.read_csv(uploaded_file, sep=';', encoding='utf-8')
+        
+        # Sprawdź wymagane kolumny (case insensitive)
+        df.columns = df.columns.str.lower()
         required_cols = ['machinecode', 'linecode']
         
-        found_machinecode = [col for col in df.columns if 'machinecode' in col]
-        found_linecode = [col for col in df.columns if 'linecode' in col]
-        
-        if not found_machinecode or not found_linecode:
-            st.error(f"Nie znaleziono wymaganych kolumn zawierających 'machinecode' i 'linecode'")
+        if not all(col in df.columns for col in required_cols):
+            st.error("Brak wymaganych kolumn 'machinecode' lub 'linecode' w pliku")
             return None
+            
+        # Wyczyść dane
+        df['Stacja'] = df['machinecode'].str.extract(r'([A-Za-z0-9]+)')[0]
+        df['Linia'] = df['linecode'].str.extract(r'([A-Za-z0-9]+)')[0]
         
-        machinecode_col = found_machinecode[0]
-        linecode_col = found_linecode[0]
-
-        # Parsowanie daty z nazwy pliku
-        data_dzienna = extract_date_from_filename(filename)
-        if not data_dzienna:
-            st.error("Nie udało się wyciągnąć daty z nazwy pliku. Wymagany format: DispatchHistory--RRRR-MM-DD.csv")
-            return None
-
-        # Filtrowanie i czyszczenie danych
-        df = df.dropna(subset=[machinecode_col, linecode_col])
-        df['machinecode_clean'] = df[machinecode_col].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
-        df['linecode_clean'] = df[linecode_col].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
-
-        # Przygotowanie danych wyjściowych
-        df_out = df[['machinecode_clean', 'linecode_clean']].drop_duplicates()
-        df_out = df_out.rename(columns={
-            'machinecode_clean': 'Stacja',
-            'linecode_clean': 'Linia'
-        })
-        df_out['data_dzienna'] = pd.to_datetime(data_dzienna) + pd.Timedelta(days=1)  # Jutro
+        # Data jutra (z nazwy pliku lub dzisiejsza +1 dzień)
+        date_match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', uploaded_file.name)
+        data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else pd.Timestamp.now() + pd.Timedelta(days=1)
         
-        return df_out
-
+        # Przygotuj finalny DataFrame
+        result = df[['Stacja', 'Linia']].drop_duplicates()
+        result['data_dzienna'] = data_dzienna
+        
+        return result
+    
     except Exception as e:
-        st.error(f"Błąd podczas przetwarzania pliku: {str(e)}")
+        st.error(f"Błąd przetwarzania pliku: {str(e)}")
         return None
 
-def prepare_prediction_data(df):
-    # 🔢 Przygotowanie danych
-    X = df[['Stacja']].copy()
-    X['Stacja'] = X['Stacja'].astype(str)
-    X_encoded = pd.get_dummies(X['Stacja'])
+def prepare_features(df):
+    # Kodowanie cech zgodnie z wymaganiami modelu
+    X = pd.get_dummies(df['Stacja'])
     
-    # Upewnij się, że mamy wszystkie wymagane kolumny
+    # Uzupełnij brakujące kolumny
     if hasattr(model, 'feature_names_in_'):
-        missing_cols = set(model.feature_names_in_) - set(X_encoded.columns)
+        missing_cols = set(model.feature_names_in_) - set(X.columns)
         for col in missing_cols:
-            X_encoded[col] = 0
-        X_encoded = X_encoded[model.feature_names_in_]
+            X[col] = 0
+        X = X[model.feature_names_in_]
     
-    # 🧠 Predykcja
-    df['Predykcja awarii'] = model.predict(X_encoded)
-    df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
-    
-    return df
+    return X
 
-def display_results(df, wybrana_linia):
-    # 🔍 Filtrowanie tylko dla wybranej linii
-    df_filtered = df[df['Linia'] == wybrana_linia].copy()
-    
-    # 🧹 Usuń duplikaty stacji
-    df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
-    
-    # 🔢 Dodaj Lp
-    df_filtered.insert(0, "Lp.", range(1, len(df_filtered) + 1))
-    
-    # 📋 Wyświetl metrykę
-    liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
-    st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
-    
-    # 📊 Tabela wyników
-    st.dataframe(
-        df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']].reset_index(drop=True),
-        use_container_width=True
-    )
-    
-    # 💾 Eksport CSV
-    st.download_button(
-        label="⬇️ Pobierz dane do CSV",
-        data=df_filtered.to_csv(index=False).encode('utf-8'),
-        file_name="predykcja_1dzien.csv",
-        mime="text/csv"
-    )
-    
-    # 💾 Eksport XLSX
-    def convert_df_to_excel_bytes(df):
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name="Predykcja")
-        return output.getvalue()
-    
-    st.download_button(
-        label="⬇️ Pobierz dane do Excel (XLSX)",
-        data=convert_df_to_excel_bytes(df_filtered),
-        file_name="predykcja_1dzien.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+# UI do wgrywania plików
+uploaded_file = st.file_uploader("📤 Wgraj plik DispatchHistory--*.csv", type=['csv'])
 
-# UI do wyboru źródła danych
-data_source = st.radio("Wybierz źródło danych:", ["Domyślne dane", "Wgraj własny plik"])
-
-if data_source == "Domyślne dane":
-    try:
-        # 📊 Wczytaj domyślne dane
-        df = pd.read_csv("dane_predykcja_1dzien.csv")
-        df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
+if uploaded_file:
+    with st.spinner("Przetwarzanie danych..."):
+        df = process_uploaded_file(uploaded_file)
         
-        # Użyj najnowszej daty z danych
-        data_jutra = df['data_dzienna'].max()
-        df = df[df['data_dzienna'] == data_jutra]
-        
-        # ⏳ Dzień jutro – tylko jako tekst
-        st.markdown(f"**Dzień:** Jutro ({data_jutra.strftime('%Y-%m-%d')})")
-        
-        # Przygotuj dane do predykcji
-        df = prepare_prediction_data(df)
-        
-        # 📍 Filtr linii
-        linie = sorted(df['Linia'].unique())
-        wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
-        
-        # Wyświetl wyniki
-        display_results(df, wybrana_linia)
-        
-    except Exception as e:
-        st.error(f"Błąd podczas wczytywania domyślnych danych: {str(e)}")
-
-else:
-    # UI do przesyłania plików
-    uploaded_file = st.file_uploader("📤 Wgraj plik CSV (DispatchHistory--*.csv)", type=['csv'])
-    
-    if uploaded_file is not None:
-        with st.spinner("⏳ Przetwarzanie pliku..."):
-            converted_df = convert_csv_to_model_input(uploaded_file, uploaded_file.name)
+        if df is not None:
+            # Przygotuj dane do predykcji
+            X = prepare_features(df)
             
-            if converted_df is not None:
-                st.success("✅ Plik poprawnie przekształcony")
+            # Wykonaj predykcję
+            df['Predykcja awarii'] = model.predict(X)
+            df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
+            
+            # Pokaż wszystkie dostępne linie
+            linie = sorted(df['Linia'].unique())
+            if len(linie) == 0:
+                st.error("Nie znaleziono żadnych linii w danych!")
+                st.stop()
                 
-                # ⏳ Dzień jutro – tylko jako tekst
-                st.markdown(f"**Dzień:** Jutro ({converted_df['data_dzienna'].iloc[0].strftime('%Y-%m-%d')})")
-                
-                # Przygotuj dane do predykcji
-                df_pred = prepare_prediction_data(converted_df)
-                
-                # 📍 Filtr linii
-                linie = sorted(df_pred['Linia'].unique())
-                wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
-                
-                # Wyświetl wyniki
-                display_results(df_pred, wybrana_linia)
+            wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
+            
+            # Filtruj i wyświetl wyniki
+            df_filtered = df[df['Linia'] == wybrana_linia].copy()
+            df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
+            df_filtered.insert(0, "Lp.", range(1, len(df_filtered)+1))
+            
+            # Statystyki
+            liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
+            st.metric("🔧 Przewidywane awarie", f"{liczba_awarii} stacji")
+            
+            # Tabela wyników
+            st.dataframe(
+                df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']],
+                use_container_width=True
+            )
+            
+            # Przyciski eksportu
+            csv = df_filtered.to_csv(index=False).encode('utf-8')
+            st.download_button("⬇️ Pobierz CSV", data=csv, file_name="predykcja.csv", mime="text/csv")
+else:
+    st.warning("Proszę wgrać plik z danymi")
