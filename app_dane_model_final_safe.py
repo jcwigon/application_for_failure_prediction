@@ -22,29 +22,46 @@ def extract_date_from_filename(filename):
 
 def convert_csv_to_model_input(file, filename):
     try:
-        # Wczytaj CSV z różnymi opcjami kodowania
+        # Wczytaj CSV z różnymi opcjami kodowania i separatorami
         for encoding in ['utf-8', 'latin1', 'cp1250']:
             try:
                 file.seek(0)  # Reset pozycji pliku przed ponownym odczytem
-                df = pd.read_csv(file, header=0, encoding=encoding)
+                # Próba wczytania z różnymi separatorami
+                for sep in [';', ',', '\t']:
+                    try:
+                        df = pd.read_csv(file, header=0, encoding=encoding, sep=sep)
+                        if len(df.columns) > 1:  # Jeśli udało się podzielić na kolumny
+                            break
+                    except:
+                        continue
+                else:
+                    continue
                 break
             except UnicodeDecodeError:
                 continue
         else:
-            st.error("Nie można odczytać pliku - problem z kodowaniem znaków")
+            st.error("Nie można odczytać pliku - problem z kodowaniem znaków lub separatorem")
             return None
 
         # Debugowanie - pokaż nagłówki
         st.write("Znalezione kolumny:", df.columns.tolist())
         
-        # Sprawdzenie wymaganych kolumn (case-insensitive)
+        # Sprawdzenie wymaganych kolumn (case-insensitive i z uwzględnieniem białych znaków)
         df.columns = df.columns.str.strip().str.lower()
         required_cols = ['machinecode', 'linecode']
         
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        if missing_cols:
-            st.error(f"Brak wymaganych kolumn: {missing_cols}. Dostępne kolumny to: {df.columns.tolist()}")
+        # Sprawdź czy wymagane kolumny istnieją (w całości lub jako część nazwy kolumny)
+        found_machinecode = [col for col in df.columns if 'machinecode' in col]
+        found_linecode = [col for col in df.columns if 'linecode' in col]
+        
+        if not found_machinecode or not found_linecode:
+            st.error(f"Nie znaleziono wymaganych kolumn. Szukane kolumny zawierające: 'machinecode' i 'linecode'")
+            st.error(f"Dostępne kolumny to: {df.columns.tolist()}")
             return None
+        
+        # Wybierz pierwsze pasujące kolumny
+        machinecode_col = found_machinecode[0]
+        linecode_col = found_linecode[0]
 
         # Parsowanie daty z nazwy pliku
         data_dzienna = extract_date_from_filename(filename)
@@ -53,17 +70,17 @@ def convert_csv_to_model_input(file, filename):
             return None
 
         # Filtrowanie i czyszczenie danych
-        df = df.dropna(subset=['machinecode', 'linecode'])
+        df = df.dropna(subset=[machinecode_col, linecode_col])
         
-        # Ekstrakcja podstawowych wartości (np. 'DB05' z 'DB05st100')
-        df['machinecode'] = df['machinecode'].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
-        df['linecode'] = df['linecode'].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
+        # Ekstrakcja podstawowych wartości
+        df['machinecode_clean'] = df[machinecode_col].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
+        df['linecode_clean'] = df[linecode_col].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
 
         # Budujemy unikalne zgłoszenia awarii
-        df_awarie = df[['machinecode', 'linecode']].drop_duplicates()
+        df_awarie = df[['machinecode_clean', 'linecode_clean']].drop_duplicates()
         df_awarie = df_awarie.rename(columns={
-            'machinecode': 'Stacja',
-            'linecode': 'Linia'
+            'machinecode_clean': 'Stacja',
+            'linecode_clean': 'Linia'
         })
         df_awarie['data_dzienna'] = data_dzienna
         df_awarie['czy_wystapila_awaria'] = 1
@@ -79,8 +96,8 @@ uploaded_file = st.file_uploader("📤 Wgraj plik CSV (DispatchHistory--*.csv)",
 if uploaded_file is not None:
     with st.spinner("⏳ Przetwarzanie pliku..."):
         # Podgląd pierwszych linii pliku
-        file_content = uploaded_file.getvalue().decode('utf-8', errors='replace')
-        st.text("Pierwsze linie pliku:\n" + "\n".join(file_content.split('\n')[:3]))
+        file_content = uploaded_file.getvalue().decode('utf-8', errors='replace').split('\n')
+        st.text("Pierwsze linie pliku:\n" + "\n".join(file_content[:3]))
         
         converted_df = convert_csv_to_model_input(uploaded_file, uploaded_file.name)
 
@@ -113,7 +130,7 @@ if uploaded_file is not None:
                 st.metric("Liczba przewidzianych awarii", sum(y_pred))
                 
                 # 📥 Pobranie wyniku jako CSV
-                csv = converted_df.to_csv(index=False).encode('utf-8')
+                csv = converted_df.to_csv(index=False, sep=';').encode('utf-8')
                 st.download_button(
                     "⬇️ Pobierz wynik jako CSV", 
                     data=csv, 
@@ -123,4 +140,3 @@ if uploaded_file is not None:
                 
             except Exception as e:
                 st.error(f"Błąd podczas predykcji: {str(e)}")
-
