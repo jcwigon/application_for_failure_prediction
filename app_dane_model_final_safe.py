@@ -93,50 +93,63 @@ if uploaded_file is not None:
 
             # 🔢 Przygotowanie danych
             X = converted_df[['Stacja']].copy()
-            X['Stacja'] = X['Stacja'].astype(str)
-            X_encoded = pd.get_dummies(X, drop_first=False)
+            
+            # Kodowanie cech - musi być zgodne z tym, czego oczekuje model
+            X_encoded = pd.get_dummies(X['Stacja'])
+            
+            # Upewnij się, że mamy wszystkie wymagane kolumny
+            if hasattr(model, 'feature_names_in_'):
+                missing_cols = set(model.feature_names_in_) - set(X_encoded.columns)
+                for col in missing_cols:
+                    X_encoded[col] = 0
+                X_encoded = X_encoded[model.feature_names_in_]
+            
+            try:
+                # 🧠 Predykcja
+                converted_df['Predykcja awarii'] = model.predict(X_encoded)
+                converted_df['Predykcja awarii'] = converted_df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
 
-            # 🧠 Predykcja
-            converted_df['Predykcja awarii'] = model.predict(X_encoded)
-            converted_df['Predykcja awarii'] = converted_df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
+                # 🔍 Filtrowanie tylko dla wybranej linii
+                df_filtered = converted_df[converted_df['Linia'] == wybrana_linia].copy()
 
-            # 🔍 Filtrowanie tylko dla wybranej linii
-            df_filtered = converted_df[converted_df['Linia'] == wybrana_linia].copy()
+                # 🧹 Usuń duplikaty stacji
+                df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
 
-            # 🧹 Usuń duplikaty stacji
-            df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
+                # 🔢 Dodaj Lp
+                df_filtered.insert(0, "Lp.", range(1, len(df_filtered) + 1))
 
-            # 🔢 Dodaj Lp
-            df_filtered.insert(0, "Lp.", range(1, len(df_filtered) + 1))
+                # 📋 Wyświetl metrykę
+                liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
+                st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
 
-            # 📋 Wyświetl metrykę
-            liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
-            st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
+                # 📊 Tabela wyników
+                st.dataframe(
+                    df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']].reset_index(drop=True),
+                    use_container_width=True
+                )
 
-            # 📊 Tabela wyników
-            st.dataframe(
-                df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']].reset_index(drop=True),
-                use_container_width=True
-            )
+                # 💾 Eksport CSV
+                st.download_button(
+                    label="⬇️ Pobierz dane do CSV",
+                    data=df_filtered.to_csv(index=False).encode('utf-8'),
+                    file_name="predykcja_1dzien.csv",
+                    mime="text/csv"
+                )
 
-            # 💾 Eksport CSV
-            st.download_button(
-                label="⬇️ Pobierz dane do CSV",
-                data=df_filtered.to_csv(index=False).encode('utf-8'),
-                file_name="predykcja_1dzien.csv",
-                mime="text/csv"
-            )
+                # 💾 Eksport XLSX
+                def convert_df_to_excel_bytes(df):
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df.to_excel(writer, index=False, sheet_name="Predykcja")
+                    return output.getvalue()
 
-            # 💾 Eksport XLSX
-            def convert_df_to_excel_bytes(df):
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, index=False, sheet_name="Predykcja")
-                return output.getvalue()
-
-            st.download_button(
-                label="⬇️ Pobierz dane do Excel (XLSX)",
-                data=convert_df_to_excel_bytes(df_filtered),
-                file_name="predykcja_1dzien.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+                st.download_button(
+                    label="⬇️ Pobierz dane do Excel (XLSX)",
+                    data=convert_df_to_excel_bytes(df_filtered),
+                    file_name="predykcja_1dzien.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            except Exception as e:
+                st.error(f"Błąd podczas predykcji: {str(e)}")
+                st.error("Upewnij się, że model jest kompatybilny z danymi wejściowymi")
