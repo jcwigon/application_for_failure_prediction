@@ -3,6 +3,7 @@ import pandas as pd
 import joblib
 import re
 from io import BytesIO
+from datetime import datetime
 
 st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
 
@@ -12,15 +13,14 @@ st.info("Aplikacja przewiduje, czy jutro wystąpi awaria na stacji.")
 # 📦 Wczytaj model
 try:
     model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
-    # Pobierz listę stacji, których oczekuje model
     if hasattr(model, 'feature_names_in_'):
-        expected_features = set(model.feature_names_in_)
+        expected_stations = set(model.feature_names_in_)
 except Exception as e:
     st.error(f"Błąd podczas wczytywania modelu: {str(e)}")
     st.stop()
 
 def load_default_data():
-    """Wczytuje domyślne dane i wykonuje predykcję"""
+    """Wczytuje domyślne dane z pliku CSV"""
     try:
         df = pd.read_csv("dane_predykcja_1dzien.csv")
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
@@ -58,10 +58,25 @@ def convert_uploaded_file(uploaded_file):
         date_match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', uploaded_file.name)
         data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else pd.Timestamp.now() + pd.Timedelta(days=1)
         
-        # Stwórz finalny DataFrame
-        result = df[['Stacja', 'Linia']].drop_duplicates()
-        result['data_dzienna'] = data_dzienna
+        # Stwórz pełny zestaw danych z 1 (awaria) i 0 (brak awarii)
+        unique_stations = df[['Stacja', 'Linia']].drop_duplicates()
+        unique_stations['czy_wystapila_awaria'] = 1
         
+        # Pobierz wszystkie możliwe stacje (z modelu lub danych)
+        all_stations = expected_stations if hasattr(model, 'feature_names_in_') else set(unique_stations['Stacja'])
+        
+        # Dodaj przykłady negatywne (0) dla stacji bez awarii
+        full_data = []
+        for station in all_stations:
+            line = unique_stations[unique_stations['Stacja'] == station]['Linia'].iloc[0] if station in unique_stations['Stacja'].values else 'UNKNOWN'
+            full_data.append({
+                'Stacja': station,
+                'Linia': line,
+                'data_dzienna': data_dzienna,
+                'czy_wystapila_awaria': 1 if station in unique_stations['Stacja'].values else 0
+            })
+        
+        result = pd.DataFrame(full_data)
         return result
     except Exception as e:
         st.error(f"Błąd przetwarzania pliku: {str(e)}")
