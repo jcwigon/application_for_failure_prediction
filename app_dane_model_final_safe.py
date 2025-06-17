@@ -6,25 +6,6 @@ from io import BytesIO
 
 st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
 
-# Custom CSS for table styling
-st.markdown("""
-<style>
-    table {
-        width: 100%;
-    }
-    th {
-        font-weight: bold !important;
-        text-align: left !important;
-    }
-    td {
-        vertical-align: middle !important;
-    }
-    .stDataFrame {
-        font-size: 14px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 st.title("🛠 Predykcja awarii – 1 dzień do przodu")
 st.info("Aplikacja przewiduje, czy jutro wystąpi awaria na stacji.")
 
@@ -40,7 +21,6 @@ except Exception as e:
 def convert_dispatch_to_model_format(uploaded_file):
     """Konwertuje plik DispatchHistory do odpowiedniego formatu"""
     try:
-        # Wczytaj plik z różnymi separatorami
         for sep in [';', ',', '\t']:
             try:
                 df = pd.read_csv(uploaded_file, sep=sep, encoding='utf-8')
@@ -52,27 +32,22 @@ def convert_dispatch_to_model_format(uploaded_file):
             st.error("Nie można odczytać pliku - sprawdź separator (powinien być ; , lub tab)")
             return None
 
-        # Sprawdź wymagane kolumny
         df.columns = df.columns.str.strip().str.lower()
         if 'machinecode' not in df.columns or 'linecode' not in df.columns:
             st.error("Brak wymaganych kolumn 'machinecode' lub 'linecode' w pliku")
             return None
 
-        # Wyczyść i przygotuj dane
         df['Stacja'] = df['machinecode'].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
         df['Linia'] = df['linecode'].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
         
-        # Data z nazwy pliku lub jutro
         date_match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', uploaded_file.name)
         data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else pd.Timestamp.now() + pd.Timedelta(days=1)
         
-        # Stwórz pełny zestaw danych (1 dla awarii, 0 dla braku)
         all_stations = expected_stations if hasattr(model, 'feature_names_in_') else set(df['Stacja'].unique())
         stations_with_failure = set(df['Stacja'].unique())
         
         result = []
         for station in all_stations:
-            # Znajdź linię dla stacji (jeśli istnieje w danych)
             line = df[df['Stacja'] == station]['Linia'].iloc[0] if station in df['Stacja'].values else station[:4]
             result.append({
                 'Stacja': station,
@@ -87,11 +62,10 @@ def convert_dispatch_to_model_format(uploaded_file):
         st.error(f"Błąd przetwarzania pliku: {str(e)}")
         return None
 
-# UI do wyboru źródła danych
+# UI
 data_source = st.radio("Wybierz źródło danych:", ["Domyślne dane", "Wgraj plik DispatchHistory"])
 
 if data_source == "Domyślne dane":
-    # Użyj oryginalnego kodu z domyślnymi danymi
     try:
         df = pd.read_csv("dane_predykcja_1dzien.csv")
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
@@ -106,7 +80,6 @@ if data_source == "Domyślne dane":
         X['Stacja'] = X['Stacja'].astype(str)
         X_encoded = pd.get_dummies(X, drop_first=False)
         
-        # Dopasuj kolumny do wymagań modelu
         if hasattr(model, 'feature_names_in_'):
             missing_cols = set(model.feature_names_in_) - set(X_encoded.columns)
             for col in missing_cols:
@@ -114,13 +87,10 @@ if data_source == "Domyślne dane":
             X_encoded = X_encoded[model.feature_names_in_]
         
         df['Predykcja awarii'] = model.predict(X_encoded)
-        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "● Brak", 1: "● Będzie"})
+        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})  # Kolorowe ikony
         
-        # Bezpieczne filtrowanie
         df_filtered = df[df['Linia'] == wybrana_linia].copy()
         df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
-        
-        # Dodaj numerację
         df_filtered.insert(0, "Lp.", range(1, len(df_filtered)+1))
         
     except Exception as e:
@@ -138,7 +108,6 @@ else:
             
         st.markdown(f"**Dzień:** Jutro ({df['data_dzienna'].iloc[0].strftime('%Y-%m-%d')})")
         
-        # Pokaż wszystkie dostępne linie
         linie = sorted(df['Linia'].dropna().unique())
         if not linie:
             st.error("Nie znaleziono żadnych linii w danych!")
@@ -146,49 +115,35 @@ else:
             
         wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
         
-        # Przygotuj dane do predykcji
         X = df[['Stacja']].copy()
         X['Stacja'] = X['Stacja'].astype(str)
         X_encoded = pd.get_dummies(X['Stacja'])
         
-        # Dopasuj do wymagań modelu
         if hasattr(model, 'feature_names_in_'):
             missing_cols = set(model.feature_names_in_) - set(X_encoded.columns)
             for col in missing_cols:
                 X_encoded[col] = 0
             X_encoded = X_encoded[model.feature_names_in_]
         
-        # Wykonaj predykcję
         df['Predykcja awarii'] = model.predict(X_encoded)
-        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "● Brak", 1: "● Będzie"})
+        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})  # Kolorowe ikony
         
-        # Bezpieczne filtrowanie
         df_filtered = df[df['Linia'] == wybrana_linia].copy()
         df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
-        
-        # Dodaj numerację
         df_filtered.insert(0, "Lp.", range(1, len(df_filtered)+1))
 
-# Wyświetl wyniki (wspólne dla obu ścieżek)
+# Wyświetl wyniki
 if 'df_filtered' in locals():
-    # 📋 Wyświetl metrykę
-    liczba_awarii = (df_filtered['Predykcja awarii'] == '● Będzie').sum()
+    liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
     st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
     
-    # 📊 Tabela wyników
     st.dataframe(
         df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']],
         use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Lp.": st.column_config.NumberColumn(width="small"),
-            "Linia": st.column_config.TextColumn(width="medium"),
-            "Stacja": st.column_config.TextColumn(width="large"),
-            "Predykcja awarii": st.column_config.TextColumn(width="medium")
-        }
+        hide_index=True
     )
     
-    # 💾 Eksport danych
+    # Eksport danych
     csv = df_filtered.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="⬇️ Pobierz dane do CSV",
@@ -197,7 +152,6 @@ if 'df_filtered' in locals():
         mime="text/csv"
     )
     
-    # Eksport do Excel
     def to_excel(df):
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
