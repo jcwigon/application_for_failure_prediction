@@ -6,6 +6,25 @@ from io import BytesIO
 
 st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
 
+# Custom CSS for table styling
+st.markdown("""
+<style>
+    table {
+        width: 100%;
+    }
+    th {
+        font-weight: bold !important;
+        text-align: left !important;
+    }
+    td {
+        vertical-align: middle !important;
+    }
+    .stDataFrame {
+        font-size: 14px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🛠 Predykcja awarii – 1 dzień do przodu")
 st.info("Aplikacja przewiduje, czy jutro wystąpi awaria na stacji.")
 
@@ -95,7 +114,7 @@ if data_source == "Domyślne dane":
             X_encoded = X_encoded[model.feature_names_in_]
         
         df['Predykcja awarii'] = model.predict(X_encoded)
-        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
+        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "● Brak", 1: "● Będzie"})
         
         # Bezpieczne filtrowanie
         df_filtered = df[df['Linia'] == wybrana_linia].copy()
@@ -141,9 +160,9 @@ else:
         
         # Wykonaj predykcję
         df['Predykcja awarii'] = model.predict(X_encoded)
-        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
+        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "● Brak", 1: "● Będzie"})
         
-        # Bezpieczne filtrowanie - teraz po kolumnie Linia zamiast startswith
+        # Bezpieczne filtrowanie
         df_filtered = df[df['Linia'] == wybrana_linia].copy()
         df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
         
@@ -153,13 +172,20 @@ else:
 # Wyświetl wyniki (wspólne dla obu ścieżek)
 if 'df_filtered' in locals():
     # 📋 Wyświetl metrykę
-    liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
+    liczba_awarii = (df_filtered['Predykcja awarii'] == '● Będzie').sum()
     st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
     
     # 📊 Tabela wyników
     st.dataframe(
         df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']],
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Lp.": st.column_config.NumberColumn(width="small"),
+            "Linia": st.column_config.TextColumn(width="medium"),
+            "Stacja": st.column_config.TextColumn(width="large"),
+            "Predykcja awarii": st.column_config.TextColumn(width="medium")
+        }
     )
     
     # 💾 Eksport danych
