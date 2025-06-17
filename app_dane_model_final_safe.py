@@ -6,10 +6,26 @@ from io import BytesIO
 
 st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
 
+# Custom CSS
+st.markdown("""
+<style>
+    table {
+        width: 100%;
+    }
+    th {
+        font-weight: bold !important;
+        text-align: left !important;
+    }
+    td {
+        vertical-align: middle !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🛠 Predykcja awarii – 1 dzień do przodu")
 st.info("Aplikacja przewiduje, czy jutro wystąpi awaria na stacji.")
 
-# 📦 Wczytaj model
+# Wczytaj model
 try:
     model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
     if hasattr(model, 'feature_names_in_'):
@@ -19,34 +35,45 @@ except Exception as e:
     st.stop()
 
 def convert_dispatch_to_model_format(uploaded_file):
-    """Konwertuje plik DispatchHistory do odpowiedniego formatu"""
+    """Poprawiona funkcja do wczytywania plików DispatchHistory"""
     try:
-        for sep in [';', ',', '\t']:
+        # Wczytaj zawartość pliku i usuń BOM
+        content = uploaded_file.read().decode('utf-8-sig')
+        
+        # Testuj różne separatory
+        for sep in [',', ';', '\t']:
             try:
-                df = pd.read_csv(uploaded_file, sep=sep, encoding='utf-8')
+                df = pd.read_csv(BytesIO(content.encode('utf-8')), 
+                               sep=sep, 
+                               engine='python',
+                               on_bad_lines='warn')
                 if len(df.columns) > 1:
                     break
             except:
                 continue
         else:
-            st.error("Nie można odczytać pliku - sprawdź separator (powinien być ; , lub tab)")
+            st.error("Nie można odczytać pliku - sprawdź separator (powinien być , ; lub tab)")
             return None
 
+        # Sprawdź wymagane kolumny
         df.columns = df.columns.str.strip().str.lower()
         if 'machinecode' not in df.columns or 'linecode' not in df.columns:
-            st.error("Brak wymaganych kolumn 'machinecode' lub 'linecode' w pliku")
+            st.error("Brak wymaganych kolumn 'machinecode' lub 'linecode'")
             return None
 
+        # Przygotuj dane
         df['Stacja'] = df['machinecode'].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
         df['Linia'] = df['linecode'].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
         
+        # Data z nazwy pliku
         date_match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', uploaded_file.name)
         data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else pd.Timestamp.now() + pd.Timedelta(days=1)
         
-        all_stations = expected_stations if hasattr(model, 'feature_names_in_') else set(df['Stacja'].unique())
-        stations_with_failure = set(df['Stacja'].unique())
-        
+        # Przygotuj wynik
         result = []
+        stations_with_failure = set(df['Stacja'].unique())
+        all_stations = expected_stations if hasattr(model, 'feature_names_in_') else stations_with_failure
+        
         for station in all_stations:
             line = df[df['Stacja'] == station]['Linia'].iloc[0] if station in df['Stacja'].values else station[:4]
             result.append({
@@ -55,7 +82,7 @@ def convert_dispatch_to_model_format(uploaded_file):
                 'data_dzienna': data_dzienna,
                 'czy_wystapila_awaria': 1 if station in stations_with_failure else 0
             })
-        
+            
         return pd.DataFrame(result)
         
     except Exception as e:
@@ -87,7 +114,7 @@ if data_source == "Domyślne dane":
             X_encoded = X_encoded[model.feature_names_in_]
         
         df['Predykcja awarii'] = model.predict(X_encoded)
-        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})  # Kolorowe ikony
+        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
         
         df_filtered = df[df['Linia'] == wybrana_linia].copy()
         df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
@@ -110,7 +137,7 @@ else:
         
         linie = sorted(df['Linia'].dropna().unique())
         if not linie:
-            st.error("Nie znaleziono żadnych linii w danych!")
+            st.error("Nie znaleziono linii w danych!")
             st.stop()
             
         wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
@@ -126,7 +153,7 @@ else:
             X_encoded = X_encoded[model.feature_names_in_]
         
         df['Predykcja awarii'] = model.predict(X_encoded)
-        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})  # Kolorowe ikony
+        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
         
         df_filtered = df[df['Linia'] == wybrana_linia].copy()
         df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
@@ -140,7 +167,13 @@ if 'df_filtered' in locals():
     st.dataframe(
         df_filtered[['Lp.', 'Linia', 'Stacja', 'Predykcja awarii']],
         use_container_width=True,
-        hide_index=True
+        hide_index=True,
+        column_config={
+            "Lp.": st.column_config.NumberColumn(width="small"),
+            "Linia": st.column_config.TextColumn(width="medium"),
+            "Stacja": st.column_config.TextColumn(width="large"),
+            "Predykcja awarii": st.column_config.TextColumn(width="medium")
+        }
     )
     
     # Eksport danych
