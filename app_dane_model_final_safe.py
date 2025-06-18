@@ -9,22 +9,23 @@ st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide
 # Custom CSS
 st.markdown("""
 <style>
-    .stRadio > div {
-        flex-direction: row;
-        gap: 1rem;
-    }
-    .stFileUploader {
-        border: 2px dashed #1E88E5;
+    .uploadedFile {
+        padding: 12px;
+        background: #f0f2f6;
         border-radius: 5px;
-        padding: 20px;
-        text-align: center;
+        margin: 10px 0;
     }
-    .stAlert {
-        padding: 1rem;
-        border-radius: 5px;
+    .errorBox {
+        padding: 15px;
+        background: #ffebee;
+        border-left: 4px solid #f44336;
+        margin: 15px 0;
     }
-    .stMarkdown h2 {
-        margin-top: 1.5rem;
+    .successBox {
+        padding: 15px;
+        background: #e8f5e9;
+        border-left: 4px solid #4caf50;
+        margin: 15px 0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -42,90 +43,16 @@ except Exception as e:
     st.stop()
 
 def clean_station_name(name):
-    """Funkcja do czyszczenia nazw stacji"""
-    if pd.isna(name):
-        return None
-    cleaned = re.sub(r'[^A-Za-z0-9]', '', str(name)).strip().upper()
-    return cleaned if len(cleaned) >= 3 else None
+    return re.sub(r'[^A-Z0-9]', '', str(name).upper()) if pd.notna(name) else None
 
 def clean_line_name(name):
-    """Funkcja do czyszczenia nazw linii"""
-    if pd.isna(name):
-        return None
     match = re.search(r'([A-Z]{2,4}\d{0,3})', str(name).upper())
     return match.group(1) if match else None
 
-def validate_dispatch_file(df):
-    """Walidacja struktury pliku DispatchHistory"""
-    required_columns = {'machinecode', 'linecode'}
-    if not required_columns.issubset(df.columns.str.lower()):
-        missing = required_columns - set(df.columns.str.lower())
-        st.error(f"Brak wymaganych kolumn: {', '.join(missing)}")
-        return False
-    return True
-
-def convert_dispatch_to_model_format(uploaded_file):
-    """Przetwarzanie plików DispatchHistory"""
-    try:
-        content = uploaded_file.read().decode('utf-8-sig')
-        
-        # Próbuj różne separatory
-        for sep in [',', ';', '\t']:
-            try:
-                df = pd.read_csv(BytesIO(content.encode('utf-8')), 
-                               sep=sep, 
-                               engine='python',
-                               on_bad_lines='warn')
-                if len(df.columns) > 1:
-                    break
-            except:
-                continue
-        else:
-            st.error("Nieprawidłowy format pliku - użyj CSV z separatorem , ; lub tab")
-            return None
-
-        df.columns = df.columns.str.strip().str.lower()
-        if not validate_dispatch_file(df):
-            return None
-
-        # Przetwarzanie danych
-        df['Stacja'] = df['machinecode'].apply(clean_station_name)
-        df['Linia'] = df['linecode'].apply(clean_line_name)
-        df = df.dropna(subset=['Stacja', 'Linia'])
-        
-        if df.empty:
-            st.error("Brak poprawnych danych po przetworzeniu")
-            return None
-
-        date_match = re.search(r'DispatchHistory[-–](\d{4}-\d{2}-\d{2})', uploaded_file.name)
-        data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else pd.Timestamp.now() + pd.Timedelta(days=1)
-        
-        result = []
-        stations_with_failure = set(df['Stacja'].unique())
-        all_stations = expected_stations if hasattr(model, 'feature_names_in_') else stations_with_failure
-        
-        for station in all_stations:
-            line = df[df['Stacja'] == station]['Linia'].iloc[0] if station in df['Stacja'].values else None
-            if line:
-                result.append({
-                    'Stacja': station,
-                    'Linia': line,
-                    'data_dzienna': data_dzienna,
-                    'czy_wystapila_awaria': 1 if station in stations_with_failure else 0
-                })
-        
-        return pd.DataFrame(result) if result else None
-        
-    except Exception as e:
-        st.error(f"Krytyczny błąd przetwarzania: {str(e)}")
-        return None
-
 # UI - Wybór źródła danych
 st.markdown("## Wybierz źródło danych:")
-data_source = st.radio("", 
-                      ["Domyślne dane", "Wgraj plik DispatchHistory"],
-                      horizontal=True,
-                      label_visibility="collapsed")
+data_source = st.radio("", ["Domyślne dane", "Wgraj plik DispatchHistory"],
+                      horizontal=True, label_visibility="collapsed")
 
 if data_source == "Domyślne dane":
     try:
@@ -167,58 +94,118 @@ if data_source == "Domyślne dane":
         st.stop()
 else:
     st.markdown("## Prześlij plik DispatchHistory")
-    st.markdown("Plik powinien być w formacie CSV i zawierać kolumny 'machinecode' i 'linecode'")
     
-    # Poprawiony komponent do przesyłania plików
     uploaded_file = st.file_uploader(
-        "Przeciągnij i upuść plik tutaj lub kliknij, aby wybrać plik",
-        type=['csv'],
+        "Wybierz plik CSV",
+        type=["csv"],
         accept_multiple_files=False,
-        key="file_uploader"
+        help="Plik powinien zawierać kolumny 'machinecode' i 'linecode'"
     )
     
-    if uploaded_file is None:
-        st.info("Proszę wybrać plik do analizy")
+    if uploaded_file is not None:
+        st.markdown(f"""
+        <div class="uploadedFile">
+            <strong>Wybrany plik:</strong> {uploaded_file.name}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        try:
+            content = uploaded_file.getvalue().decode('utf-8-sig')
+            df = pd.read_csv(BytesIO(content.encode('utf-8')))
+            
+            # Walidacja kolumn
+            required_cols = {'machinecode', 'linecode'}
+            if not required_cols.issubset(set(df.columns.str.lower())):
+                missing = required_cols - set(df.columns.str.lower())
+                st.markdown(f"""
+                <div class="errorBox">
+                    <strong>Błąd:</strong> Brak wymaganych kolumn: {', '.join(missing)}
+                </div>
+                """, unsafe_allow_html=True)
+                st.stop()
+            
+            # Przetwarzanie danych
+            df['Stacja'] = df['machinecode'].apply(clean_station_name)
+            df['Linia'] = df['linecode'].apply(clean_line_name)
+            df = df.dropna(subset=['Stacja', 'Linia'])
+            
+            if df.empty:
+                st.markdown("""
+                <div class="errorBox">
+                    <strong>Błąd:</strong> Brak poprawnych danych w pliku
+                </div>
+                """, unsafe_allow_html=True)
+                st.stop()
+            
+            # Data z nazwy pliku
+            date_match = re.search(r'DispatchHistory[-–](\d{4}-\d{2}-\d{2})', uploaded_file.name)
+            data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else pd.Timestamp.now() + pd.Timedelta(days=1)
+            
+            # Przygotowanie danych dla modelu
+            stations_with_failure = set(df['Stacja'].unique())
+            all_stations = expected_stations if hasattr(model, 'feature_names_in_') else stations_with_failure
+            
+            result = []
+            for station in all_stations:
+                line = df[df['Stacja'] == station]['Linia'].iloc[0] if station in df['Stacja'].values else None
+                if line:
+                    result.append({
+                        'Stacja': station,
+                        'Linia': line,
+                        'data_dzienna': data_dzienna,
+                        'czy_wystapila_awaria': 1 if station in stations_with_failure else 0
+                    })
+            
+            df_processed = pd.DataFrame(result) if result else None
+            
+            if df_processed is None:
+                st.markdown("""
+                <div class="errorBox">
+                    <strong>Błąd:</strong> Nie udało się przetworzyć danych
+                </div>
+                """, unsafe_allow_html=True)
+                st.stop()
+            
+            st.markdown(f"""
+            <div class="successBox">
+                <strong>Dzień:</strong> Jutro ({data_dzienna.strftime('%Y-%m-%d')})
+            </div>
+            """, unsafe_allow_html=True)
+            
+            linie = sorted(df_processed['Linia'].dropna().unique())
+            if not linie:
+                st.error("Nie znaleziono poprawnych linii w danych!")
+                st.stop()
+                
+            wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
+            
+            X = df_processed[['Stacja']].copy()
+            X['Stacja'] = X['Stacja'].astype(str)
+            X_encoded = pd.get_dummies(X['Stacja'])
+            
+            if hasattr(model, 'feature_names_in_'):
+                missing_cols = set(model.feature_names_in_) - set(X_encoded.columns)
+                for col in missing_cols:
+                    X_encoded[col] = 0
+                X_encoded = X_encoded[model.feature_names_in_]
+            
+            df_processed['Predykcja awarii'] = model.predict(X_encoded)
+            df_processed['Predykcja awarii'] = df_processed['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
+            
+            df_filtered = df_processed[df_processed['Linia'] == wybrana_linia].copy()
+            df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
+            df_filtered.insert(0, "Lp.", range(1, len(df_filtered)+1))
+            
+        except Exception as e:
+            st.markdown(f"""
+            <div class="errorBox">
+                <strong>Błąd przetwarzania:</strong> {str(e)}
+            </div>
+            """, unsafe_allow_html=True)
+            st.stop()
+    else:
+        st.info("Proszę wybrać plik CSV do analizy")
         st.stop()
-    
-    st.markdown(f"**Wybrany plik:** {uploaded_file.name}")
-    
-    with st.spinner("Przetwarzanie danych..."):
-        df = convert_dispatch_to_model_format(uploaded_file)
-        if df is None:
-            st.error("""
-            **Nie udało się przetworzyć pliku.** Sprawdź:
-            1. Czy plik ma odpowiedni format (CSV)
-            2. Czy zawiera wymagane kolumny (machinecode, linecode)
-            3. Czy dane są poprawnie sformatowane
-            """)
-            st.stop()
-            
-        st.markdown(f"**Dzień:** Jutro ({df['data_dzienna'].iloc[0].strftime('%Y-%m-%d')})")
-        
-        linie = sorted(df['Linia'].dropna().unique())
-        if not linie:
-            st.error("Nie znaleziono poprawnych linii w danych!")
-            st.stop()
-            
-        wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
-        
-        X = df[['Stacja']].copy()
-        X['Stacja'] = X['Stacja'].astype(str)
-        X_encoded = pd.get_dummies(X['Stacja'])
-        
-        if hasattr(model, 'feature_names_in_'):
-            missing_cols = set(model.feature_names_in_) - set(X_encoded.columns)
-            for col in missing_cols:
-                X_encoded[col] = 0
-            X_encoded = X_encoded[model.feature_names_in_]
-        
-        df['Predykcja awarii'] = model.predict(X_encoded)
-        df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 Brak", 1: "🔴 Będzie"})
-        
-        df_filtered = df[df['Linia'] == wybrana_linia].copy()
-        df_filtered = df_filtered.drop_duplicates(subset=['Stacja'])
-        df_filtered.insert(0, "Lp.", range(1, len(df_filtered)+1))
 
 # Wyświetl wyniki
 if 'df_filtered' in locals():
