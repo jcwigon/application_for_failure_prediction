@@ -13,12 +13,18 @@ st.markdown("""
         flex-direction: row;
         gap: 1rem;
     }
-    .stFileUploader > div > div > div > button {
-        color: white;
-        background-color: #1E88E5;
+    .stFileUploader {
+        border: 2px dashed #1E88E5;
+        border-radius: 5px;
+        padding: 20px;
+        text-align: center;
     }
     .stAlert {
         padding: 1rem;
+        border-radius: 5px;
+    }
+    .stMarkdown h2 {
+        margin-top: 1.5rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -114,7 +120,7 @@ def convert_dispatch_to_model_format(uploaded_file):
         st.error(f"Krytyczny błąd przetwarzania: {str(e)}")
         return None
 
-# UI
+# UI - Wybór źródła danych
 st.markdown("## Wybierz źródło danych:")
 data_source = st.radio("", 
                       ["Domyślne dane", "Wgraj plik DispatchHistory"],
@@ -163,12 +169,16 @@ else:
     st.markdown("## Prześlij plik DispatchHistory")
     st.markdown("Plik powinien być w formacie CSV i zawierać kolumny 'machinecode' i 'linecode'")
     
-    uploaded_file = st.file_uploader("", 
-                                   type=['csv'],
-                                   accept_multiple_files=False,
-                                   label_visibility="collapsed")
+    # Poprawiony komponent do przesyłania plików
+    uploaded_file = st.file_uploader(
+        "Przeciągnij i upuść plik tutaj lub kliknij, aby wybrać plik",
+        type=['csv'],
+        accept_multiple_files=False,
+        key="file_uploader"
+    )
     
     if uploaded_file is None:
+        st.info("Proszę wybrać plik do analizy")
         st.stop()
     
     st.markdown(f"**Wybrany plik:** {uploaded_file.name}")
