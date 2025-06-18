@@ -9,19 +9,16 @@ st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide
 # Custom CSS
 st.markdown("""
 <style>
-    table {
-        width: 100%;
-    }
-    th {
-        font-weight: bold !important;
-        text-align: left !important;
-    }
-    td {
-        vertical-align: middle !important;
-    }
     .stRadio > div {
         flex-direction: row;
         gap: 1rem;
+    }
+    .stFileUploader > div > div > div > button {
+        color: white;
+        background-color: #1E88E5;
+    }
+    .stAlert {
+        padding: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -42,7 +39,7 @@ def clean_station_name(name):
     """Funkcja do czyszczenia nazw stacji"""
     if pd.isna(name):
         return None
-    cleaned = re.sub(r'[^A-Za-z0-9]', '', str(name)).strip()
+    cleaned = re.sub(r'[^A-Za-z0-9]', '', str(name)).strip().upper()
     return cleaned if len(cleaned) >= 3 else None
 
 def clean_line_name(name):
@@ -52,11 +49,21 @@ def clean_line_name(name):
     match = re.search(r'([A-Z]{2,4}\d{0,3})', str(name).upper())
     return match.group(1) if match else None
 
+def validate_dispatch_file(df):
+    """Walidacja struktury pliku DispatchHistory"""
+    required_columns = {'machinecode', 'linecode'}
+    if not required_columns.issubset(df.columns.str.lower()):
+        missing = required_columns - set(df.columns.str.lower())
+        st.error(f"Brak wymaganych kolumn: {', '.join(missing)}")
+        return False
+    return True
+
 def convert_dispatch_to_model_format(uploaded_file):
-    """Poprawiona funkcja do wczytywania plików DispatchHistory"""
+    """Przetwarzanie plików DispatchHistory"""
     try:
         content = uploaded_file.read().decode('utf-8-sig')
         
+        # Próbuj różne separatory
         for sep in [',', ';', '\t']:
             try:
                 df = pd.read_csv(BytesIO(content.encode('utf-8')), 
@@ -68,19 +75,23 @@ def convert_dispatch_to_model_format(uploaded_file):
             except:
                 continue
         else:
-            st.error("Nie można odczytać pliku - nieprawidłowy format")
+            st.error("Nieprawidłowy format pliku - użyj CSV z separatorem , ; lub tab")
             return None
 
         df.columns = df.columns.str.strip().str.lower()
-        if 'machinecode' not in df.columns or 'linecode' not in df.columns:
-            st.error("Brak wymaganych kolumn 'machinecode' lub 'linecode'")
+        if not validate_dispatch_file(df):
             return None
 
+        # Przetwarzanie danych
         df['Stacja'] = df['machinecode'].apply(clean_station_name)
         df['Linia'] = df['linecode'].apply(clean_line_name)
         df = df.dropna(subset=['Stacja', 'Linia'])
         
-        date_match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', uploaded_file.name)
+        if df.empty:
+            st.error("Brak poprawnych danych po przetworzeniu")
+            return None
+
+        date_match = re.search(r'DispatchHistory[-–](\d{4}-\d{2}-\d{2})', uploaded_file.name)
         data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else pd.Timestamp.now() + pd.Timedelta(days=1)
         
         result = []
@@ -96,17 +107,19 @@ def convert_dispatch_to_model_format(uploaded_file):
                     'data_dzienna': data_dzienna,
                     'czy_wystapila_awaria': 1 if station in stations_with_failure else 0
                 })
-            
+        
         return pd.DataFrame(result) if result else None
         
     except Exception as e:
-        st.error(f"Błąd przetwarzania pliku: {str(e)}")
+        st.error(f"Krytyczny błąd przetwarzania: {str(e)}")
         return None
 
 # UI
-data_source = st.radio("Wybierz źródło danych:", 
+st.markdown("## Wybierz źródło danych:")
+data_source = st.radio("", 
                       ["Domyślne dane", "Wgraj plik DispatchHistory"],
-                      horizontal=True)
+                      horizontal=True,
+                      label_visibility="collapsed")
 
 if data_source == "Domyślne dane":
     try:
@@ -147,24 +160,24 @@ if data_source == "Domyślne dane":
         st.error(f"Błąd przetwarzania domyślnych danych: {str(e)}")
         st.stop()
 else:
-    st.markdown("### Prześlij plik DispatchHistory")
-    st.caption("Plik powinien być w formacie CSV i zawierać kolumny 'machinecode' i 'linecode'")
+    st.markdown("## Prześlij plik DispatchHistory")
+    st.markdown("Plik powinien być w formacie CSV i zawierać kolumny 'machinecode' i 'linecode'")
     
-    uploaded_file = st.file_uploader("Wybierz plik", 
+    uploaded_file = st.file_uploader("", 
                                    type=['csv'],
-                                   label_visibility="collapsed",
-                                   accept_multiple_files=False)
+                                   accept_multiple_files=False,
+                                   label_visibility="collapsed")
     
-    if not uploaded_file:
+    if uploaded_file is None:
         st.stop()
-        
+    
+    st.markdown(f"**Wybrany plik:** {uploaded_file.name}")
+    
     with st.spinner("Przetwarzanie danych..."):
-        st.write(f"**Wybrany plik:** {uploaded_file.name}")
-        
         df = convert_dispatch_to_model_format(uploaded_file)
         if df is None:
             st.error("""
-            Nie udało się przetworzyć pliku. Sprawdź:
+            **Nie udało się przetworzyć pliku.** Sprawdź:
             1. Czy plik ma odpowiedni format (CSV)
             2. Czy zawiera wymagane kolumny (machinecode, linecode)
             3. Czy dane są poprawnie sformatowane
@@ -199,6 +212,7 @@ else:
 
 # Wyświetl wyniki
 if 'df_filtered' in locals():
+    st.divider()
     liczba_awarii = (df_filtered['Predykcja awarii'] == '🔴 Będzie').sum()
     st.metric(label="🔧 Przewidywane awarie", value=f"{liczba_awarii} stacji")
     
@@ -214,23 +228,24 @@ if 'df_filtered' in locals():
         }
     )
     
-    csv = df_filtered.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="⬇️ Pobierz dane do CSV",
-        data=csv,
-        file_name="predykcja_awarii.csv",
-        mime="text/csv"
-    )
-    
-    def to_excel(df):
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name="Predykcja")
-        return output.getvalue()
-    
-    st.download_button(
-        label="⬇️ Pobierz dane do Excel",
-        data=to_excel(df_filtered),
-        file_name="predykcja_awarii.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    col1, col2 = st.columns(2)
+    with col1:
+        csv = df_filtered.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="⬇️ Pobierz dane do CSV",
+            data=csv,
+            file_name="predykcja_awarii.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    with col2:
+        excel_data = BytesIO()
+        with pd.ExcelWriter(excel_data, engine='xlsxwriter') as writer:
+            df_filtered.to_excel(writer, index=False, sheet_name="Predykcja")
+        st.download_button(
+            label="⬇️ Pobierz dane do Excel",
+            data=excel_data.getvalue(),
+            file_name="predykcja_awarii.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
