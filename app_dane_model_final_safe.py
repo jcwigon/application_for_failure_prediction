@@ -112,7 +112,7 @@ if data_source == "Domyślne dane":
         st.error(f"Błąd przetwarzania domyślnych danych: {str(e)}")
         st.stop()
 else:
-    st.markdown("## Prześlij plik DispatchHistory")
+    st.markdown("## Prześlij plik DispatchHistory w formacie .CSV")
 
     with st.container():
         st.markdown('<div class="file-upload-box">', unsafe_allow_html=True)
