@@ -29,6 +29,12 @@ st.markdown("""
         padding: 10px;
         margin: 10px 0;
     }
+    .demo-info {
+        background-color: #e3f2fd;
+        padding: 12px;
+        border-radius: 5px;
+        margin: 10px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -85,11 +91,20 @@ if data_source == "Domyślne dane":
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
         df = df[df['data_dzienna'] == df['data_dzienna'].max()]
 
-        # ZMIANA TUTAJ - nowe wyświetlanie daty
+        # Wyświetlenie daty
         jutro = datetime.now() + timedelta(days=1)
         st.markdown(f"""
         📅 **Prognoza na jutro:** {jutro.strftime('%d.%m.%Y')}
         """)
+
+        # DODANY KOMUNIKAT O TRYBIE DEMONSTRACYJNYM
+        st.markdown("""
+        <div class="demo-info">
+            ℹ️ <strong>Tryb demonstracyjny</strong><br>
+            Używasz trybu demonstracyjnego aplikacji, który symuluje działanie aplikacji w celu predykcji.<br>
+            Pobierz rzeczywiste dane z systemu Leading2Lean.
+        </div>
+        """, unsafe_allow_html=True)
 
         linie = sorted(df['Linia'].dropna().unique())
         if not linie:
@@ -149,10 +164,9 @@ else:
                 if df.empty:
                     raise ValueError("Brak poprawnych danych po przetworzeniu pliku")
 
-                # ZMIANA TUTAJ - nowe wyświetlanie daty
                 jutro = datetime.now() + timedelta(days=1)
                 st.markdown(f"""
-                📅 **Prognoza na jutro:** {jutro.strftime('%d.%m.%Y')}
+                📅 **Predykcja na jutro:** {jutro.strftime('%d.%m.%Y')}
                 """)
 
                 linie = sorted(df['Linia'].dropna().unique())
