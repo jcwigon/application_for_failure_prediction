@@ -34,6 +34,22 @@ except Exception as e:
     st.error(f"Błąd podczas wczytywania modelu: {str(e)}")
     st.stop()
 
+def clean_station_name(name):
+    """Funkcja do czyszczenia nazw stacji"""
+    if pd.isna(name):
+        return None
+    # Usuń niepotrzebne znaki i zostaw tylko alfanumeryczne (min. 3 znaki)
+    cleaned = re.sub(r'[^A-Za-z0-9]', '', str(name)).strip()
+    return cleaned if len(cleaned) >= 3 else None
+
+def clean_line_name(name):
+    """Funkcja do czyszczenia nazw linii"""
+    if pd.isna(name):
+        return None
+    # Szukaj wzorca typu: 2-4 wielkie litery + opcjonalnie cyfry (np. "AB12", "LINE1")
+    match = re.search(r'([A-Z]{2,4}\d{0,3})', str(name).upper())
+    return match.group(1) if match else None
+
 def convert_dispatch_to_model_format(uploaded_file):
     """Poprawiona funkcja do wczytywania plików DispatchHistory"""
     try:
@@ -61,9 +77,12 @@ def convert_dispatch_to_model_format(uploaded_file):
             st.error("Brak wymaganych kolumn 'machinecode' lub 'linecode'")
             return None
 
-        # Przygotuj dane
-        df['Stacja'] = df['machinecode'].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
-        df['Linia'] = df['linecode'].astype(str).str.extract(r'([A-Za-z0-9]+)')[0]
+        # Przygotuj dane z lepszym czyszczeniem nazw
+        df['Stacja'] = df['machinecode'].apply(clean_station_name)
+        df['Linia'] = df['linecode'].apply(clean_line_name)
+        
+        # Usuń wiersze z brakującymi nazwami
+        df = df.dropna(subset=['Stacja', 'Linia'])
         
         # Data z nazwy pliku
         date_match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', uploaded_file.name)
@@ -75,15 +94,16 @@ def convert_dispatch_to_model_format(uploaded_file):
         all_stations = expected_stations if hasattr(model, 'feature_names_in_') else stations_with_failure
         
         for station in all_stations:
-            line = df[df['Stacja'] == station]['Linia'].iloc[0] if station in df['Stacja'].values else station[:4]
-            result.append({
-                'Stacja': station,
-                'Linia': line,
-                'data_dzienna': data_dzienna,
-                'czy_wystapila_awaria': 1 if station in stations_with_failure else 0
-            })
+            line = df[df['Stacja'] == station]['Linia'].iloc[0] if station in df['Stacja'].values else None
+            if line:  # Tylko jeśli znaleziono linię
+                result.append({
+                    'Stacja': station,
+                    'Linia': line,
+                    'data_dzienna': data_dzienna,
+                    'czy_wystapila_awaria': 1 if station in stations_with_failure else 0
+                })
             
-        return pd.DataFrame(result)
+        return pd.DataFrame(result) if result else None
         
     except Exception as e:
         st.error(f"Błąd przetwarzania pliku: {str(e)}")
@@ -98,9 +118,17 @@ if data_source == "Domyślne dane":
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
         df = df[df['data_dzienna'] == df['data_dzienna'].max()]
         
+        # Czyszczenie danych domyślnych
+        df['Linia'] = df['Linia'].apply(clean_line_name)
+        df = df.dropna(subset=['Linia'])
+        
         st.markdown(f"**Dzień:** Jutro")
         
         linie = sorted(df['Linia'].dropna().unique())
+        if not linie:
+            st.error("Brak poprawnych linii w danych domyślnych!")
+            st.stop()
+            
         wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
         
         X = df[['Stacja']].copy()
@@ -131,13 +159,14 @@ else:
     with st.spinner("Przetwarzanie danych..."):
         df = convert_dispatch_to_model_format(uploaded_file)
         if df is None:
+            st.error("Nie udało się przetworzyć pliku lub brak poprawnych danych")
             st.stop()
             
         st.markdown(f"**Dzień:** Jutro ({df['data_dzienna'].iloc[0].strftime('%Y-%m-%d')})")
         
         linie = sorted(df['Linia'].dropna().unique())
         if not linie:
-            st.error("Nie znaleziono linii w danych!")
+            st.error("Nie znaleziono poprawnych linii w danych!")
             st.stop()
             
         wybrana_linia = st.selectbox("🏭 Wybierz linię", linie)
