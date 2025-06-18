@@ -19,6 +19,10 @@ st.markdown("""
     td {
         vertical-align: middle !important;
     }
+    .stRadio > div {
+        flex-direction: row;
+        gap: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -38,7 +42,6 @@ def clean_station_name(name):
     """Funkcja do czyszczenia nazw stacji"""
     if pd.isna(name):
         return None
-    # Usuń niepotrzebne znaki i zostaw tylko alfanumeryczne (min. 3 znaki)
     cleaned = re.sub(r'[^A-Za-z0-9]', '', str(name)).strip()
     return cleaned if len(cleaned) >= 3 else None
 
@@ -46,17 +49,14 @@ def clean_line_name(name):
     """Funkcja do czyszczenia nazw linii"""
     if pd.isna(name):
         return None
-    # Szukaj wzorca typu: 2-4 wielkie litery + opcjonalnie cyfry (np. "AB12", "LINE1")
     match = re.search(r'([A-Z]{2,4}\d{0,3})', str(name).upper())
     return match.group(1) if match else None
 
 def convert_dispatch_to_model_format(uploaded_file):
     """Poprawiona funkcja do wczytywania plików DispatchHistory"""
     try:
-        # Wczytaj zawartość pliku i usuń BOM
         content = uploaded_file.read().decode('utf-8-sig')
         
-        # Testuj różne separatory
         for sep in [',', ';', '\t']:
             try:
                 df = pd.read_csv(BytesIO(content.encode('utf-8')), 
@@ -68,34 +68,28 @@ def convert_dispatch_to_model_format(uploaded_file):
             except:
                 continue
         else:
-            st.error("Nie można odczytać pliku - sprawdź separator (powinien być , ; lub tab)")
+            st.error("Nie można odczytać pliku - nieprawidłowy format")
             return None
 
-        # Sprawdź wymagane kolumny
         df.columns = df.columns.str.strip().str.lower()
         if 'machinecode' not in df.columns or 'linecode' not in df.columns:
             st.error("Brak wymaganych kolumn 'machinecode' lub 'linecode'")
             return None
 
-        # Przygotuj dane z lepszym czyszczeniem nazw
         df['Stacja'] = df['machinecode'].apply(clean_station_name)
         df['Linia'] = df['linecode'].apply(clean_line_name)
-        
-        # Usuń wiersze z brakującymi nazwami
         df = df.dropna(subset=['Stacja', 'Linia'])
         
-        # Data z nazwy pliku
         date_match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', uploaded_file.name)
         data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else pd.Timestamp.now() + pd.Timedelta(days=1)
         
-        # Przygotuj wynik
         result = []
         stations_with_failure = set(df['Stacja'].unique())
         all_stations = expected_stations if hasattr(model, 'feature_names_in_') else stations_with_failure
         
         for station in all_stations:
             line = df[df['Stacja'] == station]['Linia'].iloc[0] if station in df['Stacja'].values else None
-            if line:  # Tylko jeśli znaleziono linię
+            if line:
                 result.append({
                     'Stacja': station,
                     'Linia': line,
@@ -110,7 +104,9 @@ def convert_dispatch_to_model_format(uploaded_file):
         return None
 
 # UI
-data_source = st.radio("Wybierz źródło danych:", ["Domyślne dane", "Wgraj plik DispatchHistory"])
+data_source = st.radio("Wybierz źródło danych:", 
+                      ["Domyślne dane", "Wgraj plik DispatchHistory"],
+                      horizontal=True)
 
 if data_source == "Domyślne dane":
     try:
@@ -118,7 +114,6 @@ if data_source == "Domyślne dane":
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
         df = df[df['data_dzienna'] == df['data_dzienna'].max()]
         
-        # Czyszczenie danych domyślnych
         df['Linia'] = df['Linia'].apply(clean_line_name)
         df = df.dropna(subset=['Linia'])
         
@@ -152,14 +147,28 @@ if data_source == "Domyślne dane":
         st.error(f"Błąd przetwarzania domyślnych danych: {str(e)}")
         st.stop()
 else:
-    uploaded_file = st.file_uploader("📤 Wgraj plik DispatchHistory--*.csv", type=['csv'])
+    st.markdown("### Prześlij plik DispatchHistory")
+    st.caption("Plik powinien być w formacie CSV i zawierać kolumny 'machinecode' i 'linecode'")
+    
+    uploaded_file = st.file_uploader("Wybierz plik", 
+                                   type=['csv'],
+                                   label_visibility="collapsed",
+                                   accept_multiple_files=False)
+    
     if not uploaded_file:
         st.stop()
         
     with st.spinner("Przetwarzanie danych..."):
+        st.write(f"**Wybrany plik:** {uploaded_file.name}")
+        
         df = convert_dispatch_to_model_format(uploaded_file)
         if df is None:
-            st.error("Nie udało się przetworzyć pliku lub brak poprawnych danych")
+            st.error("""
+            Nie udało się przetworzyć pliku. Sprawdź:
+            1. Czy plik ma odpowiedni format (CSV)
+            2. Czy zawiera wymagane kolumny (machinecode, linecode)
+            3. Czy dane są poprawnie sformatowane
+            """)
             st.stop()
             
         st.markdown(f"**Dzień:** Jutro ({df['data_dzienna'].iloc[0].strftime('%Y-%m-%d')})")
@@ -205,7 +214,6 @@ if 'df_filtered' in locals():
         }
     )
     
-    # Eksport danych
     csv = df_filtered.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="⬇️ Pobierz dane do CSV",
