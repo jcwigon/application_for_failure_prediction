@@ -33,7 +33,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🛠 Predykcja awarii – 1 dzień do przodu")
-st.info("Aplikacja przewiduje, czy jutro wystąpi awaria na stacji.")
+st.info("System prognozuje wystąpienie awarii na stacji z wyprzedzeniem 24-godzinnym")
 
 # Wczytanie modelu
 try:
