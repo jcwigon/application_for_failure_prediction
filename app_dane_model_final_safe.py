@@ -3,7 +3,7 @@ import pandas as pd
 import joblib
 import re
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
 
@@ -85,7 +85,11 @@ if data_source == "Domyślne dane":
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
         df = df[df['data_dzienna'] == df['data_dzienna'].max()]
 
-        st.markdown(f"**Dzień:** Jutro")
+        # ZMIANA TUTAJ - nowe wyświetlanie daty
+        jutro = datetime.now() + timedelta(days=1)
+        st.markdown(f"""
+        📅 **Prognoza na jutro:** {jutro.strftime('%d.%m.%Y')}
+        """)
 
         linie = sorted(df['Linia'].dropna().unique())
         if not linie:
@@ -145,10 +149,11 @@ else:
                 if df.empty:
                     raise ValueError("Brak poprawnych danych po przetworzeniu pliku")
 
-                date_match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', uploaded_file.name)
-                data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else datetime.now() + pd.Timedelta(days=1)
-
-              st.markdown(f"**Dzień:** Jutro ({data_dzienna.strftime('%Y-%m-%d')})")
+                # ZMIANA TUTAJ - nowe wyświetlanie daty
+                jutro = datetime.now() + timedelta(days=1)
+                st.markdown(f"""
+                📅 **Prognoza na jutro:** {jutro.strftime('%d.%m.%Y')}
+                """)
 
                 linie = sorted(df['Linia'].dropna().unique())
                 if not linie:
@@ -210,4 +215,3 @@ if 'df_filtered' in locals():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-
