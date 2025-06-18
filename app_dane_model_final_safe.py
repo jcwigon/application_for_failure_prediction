@@ -102,7 +102,7 @@ if data_source == "Domyślne dane":
         <div class="demo-info">
             ℹ️ <strong>Tryb demonstracyjny</strong><br>
             Używasz trybu demonstracyjnego aplikacji, który symuluje działanie aplikacji w celu predykcji.<br>
-            Pobierz rzeczywiste dane z systemu Leading2Lean.
+            Przełącz się na tryb "Wgraj plik DispatchHistory" i wgraj rzeczywiste dane z systemu Leading2Lean.
         </div>
         """, unsafe_allow_html=True)
 
