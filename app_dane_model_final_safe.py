@@ -148,10 +148,7 @@ else:
                 date_match = re.search(r'DispatchHistory--(\d{4}-\d{2}-\d{2})', uploaded_file.name)
                 data_dzienna = pd.to_datetime(date_match.group(1)) if date_match else datetime.now() + pd.Timedelta(days=1)
 
-              jutro = datetime.now() + timedelta(days=1)
-st.markdown(f"""
-📅 **Predykcja na jutro:** {jutro.strftime('%d.%m.%Y')}
-""")
+              st.markdown(f"**Dzień:** Jutro ({data_dzienna.strftime('%Y-%m-%d')})")
 
                 linie = sorted(df['Linia'].dropna().unique())
                 if not linie:
