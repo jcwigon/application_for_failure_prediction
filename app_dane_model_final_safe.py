@@ -8,12 +8,11 @@ st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide
 
 # Wczytaj model trenowany na dynamicznych cechach!
 try:
-    model = joblib.load("model_predykcji_awarii_lightgbm.pkl")  # lub model_predykcji_awarii_lightgbm_dynamic.pkl jeśli tak się nazywa Twój plik
+    model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
 except Exception as e:
     st.error(f"Błąd podczas wczytywania modelu: {str(e)}")
     st.stop()
 
-# Nazwy wymaganych cech dynamicznych
 FEATURE_COLS = [
     'awarie_7dni',
     'awarie_30dni',
@@ -22,39 +21,46 @@ FEATURE_COLS = [
     'czy_wczoraj_byla_awaria'
 ]
 
-def validate_uploaded_file(uploaded_file):
-    try:
-        if not uploaded_file.name.lower().endswith('.csv'):
-            raise ValueError("Plik musi mieć rozszerzenie .csv")
+def add_dynamic_features(df):
+    df = df.sort_values(['Stacja', 'data_dzienna'])
 
-        content = uploaded_file.getvalue().decode('utf-8-sig')
-        for sep in [',', ';', '\t']:
-            try:
-                df = pd.read_csv(BytesIO(content.encode('utf-8')), sep=sep, engine='python')
-                if len(df.columns) > 1:
-                    break
-            except:
-                continue
-        else:
-            raise ValueError("Nie można odczytać pliku CSV. Sprawdź separator (przecinek, średnik lub tabulator).")
+    def rolling_awarie_7dni(x):
+        return x.rolling(window=7, min_periods=1).sum().shift(1).fillna(0)
+    df['awarie_7dni'] = df.groupby('Stacja')['czy_wystapila_awaria'].apply(rolling_awarie_7dni).reset_index(level=0, drop=True)
 
-        # Sprawdź dynamiczne kolumny
-        missing_cols = set(FEATURE_COLS) - set(df.columns)
-        if missing_cols:
-            raise ValueError(f"Brak wymaganych kolumn z cechami dynamicznymi: {', '.join(missing_cols)}")
+    def rolling_awarie_30dni(x):
+        return x.rolling(window=30, min_periods=1).sum().shift(1).fillna(0)
+    df['awarie_30dni'] = df.groupby('Stacja')['czy_wystapila_awaria'].apply(rolling_awarie_30dni).reset_index(level=0, drop=True)
 
-        # Stacja, Linia – pomocnicze do filtrowania
-        if not {'Stacja', 'Linia'}.issubset(df.columns):
-            raise ValueError("Brak wymaganych kolumn: Stacja, Linia")
+    def days_since_last_failure(group):
+        last_date = None
+        days = []
+        for idx, row in group.iterrows():
+            if row['czy_wystapila_awaria'] == 1:
+                last_date = row['data_dzienna']
+                days.append(0)
+            elif last_date is None:
+                days.append(None)
+            else:
+                days.append((row['data_dzienna'] - last_date).days)
+        return pd.Series(days, index=group.index)
+    df['dni_od_ostatniej_awarii'] = df.groupby('Stacja', group_keys=False).apply(days_since_last_failure)
 
-        return df
-    except Exception as e:
-        st.markdown(f"""
-        <div class="error-box">
-            <strong>Błąd walidacji pliku:</strong> {str(e)}
-        </div>
-        """, unsafe_allow_html=True)
-        return None
+    def days_without_failure(group):
+        count = 0
+        days = []
+        for value in group:
+            if value == 0:
+                count += 1
+            else:
+                count = 0
+            days.append(count)
+        return days
+    df['dni_bez_awarii_z_rzedu'] = df.groupby('Stacja')['czy_wystapila_awaria'].transform(days_without_failure)
+
+    df['czy_wczoraj_byla_awaria'] = df.groupby('Stacja')['czy_wystapila_awaria'].shift(1).fillna(0)
+
+    return df
 
 st.title("🛠 Predykcja awarii – 1 dzień do przodu")
 st.info("System prognozuje wystąpienie awarii na stacji z wyprzedzeniem 24-godzinnym")
@@ -65,8 +71,9 @@ data_source = st.radio("", ["Domyślne dane", "Wgraj plik DispatchHistory"],
 
 if data_source == "Domyślne dane":
     try:
-        df = pd.read_csv("dane_predykcja_1dzien.csv")  # plik z dynamicznymi cechami!
+        df = pd.read_csv("dane_predykcja_1dzien.csv")
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
+        df = add_dynamic_features(df)
         df = df[df['data_dzienna'] == df['data_dzienna'].max()]
 
         jutro = datetime.now() + timedelta(days=1)
@@ -120,11 +127,33 @@ else:
         """, unsafe_allow_html=True)
 
         with st.spinner("Processing file..."):
-            df = validate_uploaded_file(uploaded_file)
-            if df is None:
-                st.stop()
-
             try:
+                content = uploaded_file.getvalue().decode('utf-8-sig')
+                for sep in [',', ';', '\t']:
+                    try:
+                        df = pd.read_csv(BytesIO(content.encode('utf-8')), sep=sep, engine='python')
+                        if len(df.columns) > 1:
+                            break
+                    except:
+                        continue
+                else:
+                    raise ValueError("Nie można odczytać pliku CSV. Sprawdź separator (przecinek, średnik lub tabulator).")
+
+                # Mapowanie kolumn po wgraniu pliku!
+                df = df.rename(columns={
+                    'dispatched': 'data_dzienna',
+                    'machinecode': 'Stacja',
+                    'linecode': 'Linia'
+                })
+                df['data_dzienna'] = pd.to_datetime(df['data_dzienna']).dt.date
+
+                # Agregacja: jeden wpis na dzień, stację, linię – każda linia = awaria
+                df = df.groupby(['data_dzienna', 'Stacja', 'Linia']).size().reset_index(name='czy_wystapila_awaria')
+                df['czy_wystapila_awaria'] = 1
+
+                df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
+                df = add_dynamic_features(df)
+
                 if df.empty:
                     raise ValueError("No valid data after processing file")
 
@@ -186,4 +215,5 @@ if 'df_filtered' in locals():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
+
 
