@@ -11,7 +11,7 @@ st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide
 
 # Wczytaj nowy model (po treningu na dynamicznych cechach!)
 try:
-    model = joblib.load("model_predykcji_awarii_lightgbm_dynamic.pkl")  # <-- nowa nazwa modelu!
+    model = joblib.load("model_predykcji_awarii_lightgbm.pkl")  # <-- nowa nazwa modelu!
 except Exception as e:
     st.error(f"Błąd podczas wczytywania modelu: {str(e)}")
     st.stop()
@@ -65,7 +65,7 @@ data_source = st.radio("", ["Domyślne dane", "Wgraj plik DispatchHistory"],
 
 if data_source == "Domyślne dane":
     try:
-        df = pd.read_csv("dane_predykcja_1dzien_cechy.csv")  # <-- plik z cechami dynamicznymi!
+        df = pd.read_csv("dane_predykcja_1dzien.csv")  # <-- plik z cechami dynamicznymi!
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
         df = df[df['data_dzienna'] == df['data_dzienna'].max()]
 
