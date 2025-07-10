@@ -149,24 +149,30 @@ else:
                 # Konwersja do daty bez godziny (do MultiIndex)
                 df['data_dzienna'] = df['data_dzienna'].dt.normalize()
 
+                # RZECZYWISTE pary stacja-linia (każda stacja tylko w swojej linii!)
                 all_dates = pd.date_range(df['data_dzienna'].min(), df['data_dzienna'].max())
-                all_stations = df['Stacja'].unique()
-                all_lines = df['Linia'].unique()
+                stacja_linia = df[['Stacja', 'Linia']].drop_duplicates()
 
-                multi = pd.MultiIndex.from_product([all_dates, all_stations, all_lines], names=['data_dzienna', 'Stacja', 'Linia'])
-                df_full = pd.DataFrame(index=multi).reset_index()
+                siatka = pd.MultiIndex.from_product(
+                    [all_dates, stacja_linia.itertuples(index=False, name=None)],
+                    names=['data_dzienna', 'stacja_linia']
+                )
+                df_full = pd.DataFrame(index=siatka).reset_index()
+
+                # Rozbij tuple (Stacja, Linia) na dwie kolumny
+                df_full[['Stacja', 'Linia']] = pd.DataFrame(df_full['stacja_linia'].tolist(), index=df_full.index)
+                df_full = df_full.drop(columns=['stacja_linia'])
 
                 df_events = df.groupby(['data_dzienna', 'Stacja', 'Linia']).size().reset_index(name='awaria_event')
                 df_events['awaria_event'] = 1
 
-                # Najważniejsze: PRZED MERGE oba data_dzienna jako datetime64[ns]!
+                # PRZED MERGE oba data_dzienna jako datetime64[ns]!
                 df_full['data_dzienna'] = pd.to_datetime(df_full['data_dzienna'])
                 df_events['data_dzienna'] = pd.to_datetime(df_events['data_dzienna'])
 
                 df_full = df_full.merge(df_events, on=['data_dzienna', 'Stacja', 'Linia'], how='left')
                 df_full['czy_wystapila_awaria'] = df_full['awaria_event'].fillna(0).astype(int)
 
-                # Dalej na timestampach (pełne daty)
                 df_full = add_dynamic_features(df_full)
 
                 linie = sorted(df_full['Linia'].dropna().unique())
@@ -229,5 +235,6 @@ if 'df_filtered' in locals():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
+
 
 
