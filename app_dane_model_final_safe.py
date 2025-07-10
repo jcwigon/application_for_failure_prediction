@@ -139,18 +139,11 @@ else:
                 else:
                     raise ValueError("Nie można odczytać pliku CSV. Sprawdź separator (przecinek, średnik lub tabulator).")
 
+                # DEBUG:
                 st.write("DEBUG: Wszystkie kolumny po wczytaniu pliku:", df.columns.tolist())
 
-                # POPRAWKA NA WIELOKROTNE 'linecode':
-                if 'linecode' in df.columns:
-                    # Jeśli Pandas zduplikował 'linecode' jako DataFrame, wybierz pierwszą kolumnę
-                    if isinstance(df['linecode'], pd.DataFrame):
-                        df['Linia'] = df['linecode'].iloc[:, 0]
-                    else:
-                        df['Linia'] = df['linecode']
-                else:
-                    st.error("Brak kolumny 'linecode' w pliku!")
-
+                # Mapowanie kolumn po wgraniu pliku!
+                df['Linia'] = df['linecode']
                 df['Stacja'] = df['machinecode']
                 df['data_dzienna'] = df['dispatched']
 
