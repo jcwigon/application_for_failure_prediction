@@ -139,16 +139,25 @@ else:
                 else:
                     raise ValueError("Nie można odczytać pliku CSV. Sprawdź separator (przecinek, średnik lub tabulator).")
 
-                # Mapowanie kolumn po wgraniu pliku!
-                df = df.rename(columns={
-                    'dispatched': 'data_dzienna',
-                    'machinecode': 'Stacja',
-                    'linecode': 'Linia'
-                })
-                df['data_dzienna'] = pd.to_datetime(df['data_dzienna']).dt.date
+                st.write("DEBUG: Wszystkie kolumny po wczytaniu pliku:", df.columns.tolist())
 
-                # --- DIAGNOZA ---
-                st.write("DEBUG: Kolumny po rename:", df.columns.tolist())
+                # POPRAWKA NA WIELOKROTNE 'linecode':
+                if 'linecode' in df.columns:
+                    # Jeśli Pandas zduplikował 'linecode' jako DataFrame, wybierz pierwszą kolumnę
+                    if isinstance(df['linecode'], pd.DataFrame):
+                        df['Linia'] = df['linecode'].iloc[:, 0]
+                    else:
+                        df['Linia'] = df['linecode']
+                else:
+                    st.error("Brak kolumny 'linecode' w pliku!")
+
+                df['Stacja'] = df['machinecode']
+                df['data_dzienna'] = df['dispatched']
+
+                # Usuwanie duplikatów kolumn jeśli są
+                df = df.loc[:, ~df.columns.duplicated()]
+
+                st.write("DEBUG: Kolumny po mapowaniu:", df.columns.tolist())
                 st.write("DEBUG: Typ kolumny 'Linia':", type(df['Linia']))
                 st.write("DEBUG: Przykładowe wartości 'Linia':", df['Linia'].head(10))
                 st.write("DEBUG: Typ kolumny 'Stacja':", type(df['Stacja']))
@@ -157,6 +166,7 @@ else:
 
                 df['Linia'] = df['Linia'].astype(str)
                 df['Stacja'] = df['Stacja'].astype(str)
+                df['data_dzienna'] = pd.to_datetime(df['data_dzienna']).dt.date
 
                 # Agregacja: jeden wpis na dzień, stację, linię – każda linia = awaria
                 df = df.groupby(['data_dzienna', 'Stacja', 'Linia']).size().reset_index(name='czy_wystapila_awaria')
@@ -226,4 +236,5 @@ if 'df_filtered' in locals():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
+
 
