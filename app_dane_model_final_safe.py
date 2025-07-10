@@ -138,14 +138,15 @@ else:
                 else:
                     raise ValueError("Nie można odczytać pliku CSV. Sprawdź separator (przecinek, średnik lub tabulator).")
 
-                # Mapowanie kolumn
+                # Mapowanie kolumn i rzutowanie na datę (ważne!)
                 df['Linia'] = df['linecode']
                 df['Stacja'] = df['machinecode']
-                df['data_dzienna'] = pd.to_datetime(df['dispatched']).dt.date
+                df['data_dzienna'] = pd.to_datetime(df['dispatched'], errors='coerce')
+                df = df.dropna(subset=['data_dzienna'])  # Usuwa wiersze bez daty
+                df['data_dzienna'] = df['data_dzienna'].dt.date
                 df['Linia'] = df['Linia'].astype(str)
                 df['Stacja'] = df['Stacja'].astype(str)
 
-                # Tworzymy pełną siatkę dat, stacji, linii
                 all_dates = pd.date_range(df['data_dzienna'].min(), df['data_dzienna'].max())
                 all_stations = df['Stacja'].unique()
                 all_lines = df['Linia'].unique()
@@ -180,7 +181,7 @@ else:
 
                 df_pred.insert(0, "Lp.", range(1, len(df_pred)+1))
 
-                df_filtered = df_pred  # używamy tej zmiennej do prezentacji niżej
+                df_filtered = df_pred
 
             except Exception as e:
                 st.markdown(f"""
@@ -221,5 +222,6 @@ if 'df_filtered' in locals():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
+
 
 
