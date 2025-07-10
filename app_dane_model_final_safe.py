@@ -147,6 +147,10 @@ else:
                 })
                 df['data_dzienna'] = pd.to_datetime(df['data_dzienna']).dt.date
 
+                # NEW: Konwersja kolumn na string!
+                df['Linia'] = df['Linia'].astype(str)
+                df['Stacja'] = df['Stacja'].astype(str)
+
                 # Agregacja: jeden wpis na dzień, stację, linię – każda linia = awaria
                 df = df.groupby(['data_dzienna', 'Stacja', 'Linia']).size().reset_index(name='czy_wystapila_awaria')
                 df['czy_wystapila_awaria'] = 1
