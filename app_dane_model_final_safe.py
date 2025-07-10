@@ -143,9 +143,11 @@ else:
                 df['Stacja'] = df['machinecode']
                 df['data_dzienna'] = pd.to_datetime(df['dispatched'], errors='coerce')
                 df = df.dropna(subset=['data_dzienna'])  # Usuwa wiersze bez daty
-                df['data_dzienna'] = df['data_dzienna'].dt.date
                 df['Linia'] = df['Linia'].astype(str)
                 df['Stacja'] = df['Stacja'].astype(str)
+
+                # Konwersja do daty bez godziny (do MultiIndex)
+                df['data_dzienna'] = df['data_dzienna'].dt.normalize()
 
                 all_dates = pd.date_range(df['data_dzienna'].min(), df['data_dzienna'].max())
                 all_stations = df['Stacja'].unique()
@@ -157,10 +159,14 @@ else:
                 df_events = df.groupby(['data_dzienna', 'Stacja', 'Linia']).size().reset_index(name='awaria_event')
                 df_events['awaria_event'] = 1
 
+                # Najważniejsze: PRZED MERGE oba data_dzienna jako datetime64[ns]!
+                df_full['data_dzienna'] = pd.to_datetime(df_full['data_dzienna'])
+                df_events['data_dzienna'] = pd.to_datetime(df_events['data_dzienna'])
+
                 df_full = df_full.merge(df_events, on=['data_dzienna', 'Stacja', 'Linia'], how='left')
                 df_full['czy_wystapila_awaria'] = df_full['awaria_event'].fillna(0).astype(int)
-                df_full['data_dzienna'] = pd.to_datetime(df_full['data_dzienna'])
 
+                # Dalej na timestampach (pełne daty)
                 df_full = add_dynamic_features(df_full)
 
                 linie = sorted(df_full['Linia'].dropna().unique())
@@ -171,7 +177,8 @@ else:
                 wybrana_linia = st.selectbox("🏭 Select line", linie)
 
                 # Predykcja tylko dla najnowszego dnia
-                df_pred = df_full[df_full['data_dzienna'] == df_full['data_dzienna'].max()]
+                max_date = df_full['data_dzienna'].max()
+                df_pred = df_full[df_full['data_dzienna'] == max_date]
                 df_pred = df_pred[df_pred['Linia'] == wybrana_linia].drop_duplicates(subset=['Stacja'])
                 df_pred = df_pred.dropna(subset=FEATURE_COLS)
                 X = df_pred[FEATURE_COLS]
@@ -222,6 +229,5 @@ if 'df_filtered' in locals():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-
 
 
