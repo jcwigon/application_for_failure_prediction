@@ -147,7 +147,14 @@ else:
                 })
                 df['data_dzienna'] = pd.to_datetime(df['data_dzienna']).dt.date
 
-                # NEW: Konwersja kolumn na string!
+                # --- DIAGNOZA ---
+                st.write("DEBUG: Kolumny po rename:", df.columns.tolist())
+                st.write("DEBUG: Typ kolumny 'Linia':", type(df['Linia']))
+                st.write("DEBUG: Przykładowe wartości 'Linia':", df['Linia'].head(10))
+                st.write("DEBUG: Typ kolumny 'Stacja':", type(df['Stacja']))
+                st.write("DEBUG: Przykładowe wartości 'Stacja':", df['Stacja'].head(10))
+                st.write("DEBUG: df shape:", df.shape)
+
                 df['Linia'] = df['Linia'].astype(str)
                 df['Stacja'] = df['Stacja'].astype(str)
 
@@ -219,5 +226,4 @@ if 'df_filtered' in locals():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-
 
