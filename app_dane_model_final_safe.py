@@ -65,7 +65,7 @@ data_source = st.radio("", ["Domyślne dane", "Wgraj plik DispatchHistory"],
 
 if data_source == "Domyślne dane":
     try:
-        df = pd.read_csv("dane_predykcja_1dzien_cechy.csv")  # plik z dynamicznymi cechami!
+        df = pd.read_csv("dane_predykcja_1dzien.csv")  # plik z dynamicznymi cechami!
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
         df = df[df['data_dzienna'] == df['data_dzienna'].max()]
 
