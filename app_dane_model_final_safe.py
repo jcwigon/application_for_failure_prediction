@@ -1,22 +1,19 @@
 import streamlit as st
 import pandas as pd
 import joblib
-import re
 from io import BytesIO
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
 
-# ... (CSS i nagłówki bez zmian)
-
-# Wczytaj nowy model (po treningu na dynamicznych cechach!)
+# Wczytaj model trenowany na dynamicznych cechach!
 try:
-    model = joblib.load("model_predykcji_awarii_lightgbm.pkl")  # <-- nowa nazwa modelu!
+    model = joblib.load("model_predykcji_awarii_lightgbm.pkl")  # lub model_predykcji_awarii_lightgbm_dynamic.pkl jeśli tak się nazywa Twój plik
 except Exception as e:
     st.error(f"Błąd podczas wczytywania modelu: {str(e)}")
     st.stop()
 
-# Nazwy wymaganych cech
+# Nazwy wymaganych cech dynamicznych
 FEATURE_COLS = [
     'awarie_7dni',
     'awarie_30dni',
@@ -59,13 +56,16 @@ def validate_uploaded_file(uploaded_file):
         """, unsafe_allow_html=True)
         return None
 
+st.title("🛠 Predykcja awarii – 1 dzień do przodu")
+st.info("System prognozuje wystąpienie awarii na stacji z wyprzedzeniem 24-godzinnym")
+
 st.markdown("## Wybierz źródło danych:")
 data_source = st.radio("", ["Domyślne dane", "Wgraj plik DispatchHistory"],
                       horizontal=True, label_visibility="collapsed")
 
 if data_source == "Domyślne dane":
     try:
-        df = pd.read_csv("dane_predykcja_1dzien.csv")  # <-- plik z cechami dynamicznymi!
+        df = pd.read_csv("dane_predykcja_1dzien_cechy.csv")  # plik z dynamicznymi cechami!
         df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
         df = df[df['data_dzienna'] == df['data_dzienna'].max()]
 
@@ -86,7 +86,6 @@ if data_source == "Domyślne dane":
 
         wybrana_linia = st.selectbox("🏭 Select line", linie)
 
-        # Przygotuj dane do predykcji
         df = df.dropna(subset=FEATURE_COLS)
         X = df[FEATURE_COLS]
 
@@ -188,7 +187,3 @@ if 'df_filtered' in locals():
             use_container_width=True
         )
 
-            file_name="predykcja_awarii.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
