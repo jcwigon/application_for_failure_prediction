@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Predykcja awarii", page_icon="🛠", layout="wide")
 
-# Wczytaj model trenowany na dynamicznych cechach!
 try:
     model = joblib.load("model_predykcji_awarii_lightgbm.pkl")
 except Exception as e:
@@ -139,56 +138,49 @@ else:
                 else:
                     raise ValueError("Nie można odczytać pliku CSV. Sprawdź separator (przecinek, średnik lub tabulator).")
 
-                # DEBUG:
-                st.write("DEBUG: Wszystkie kolumny po wczytaniu pliku:", df.columns.tolist())
-
-                # Mapowanie kolumn po wgraniu pliku!
+                # Mapowanie kolumn
                 df['Linia'] = df['linecode']
                 df['Stacja'] = df['machinecode']
-                df['data_dzienna'] = df['dispatched']
-
-                # Usuwanie duplikatów kolumn jeśli są
-                df = df.loc[:, ~df.columns.duplicated()]
-
-                st.write("DEBUG: Kolumny po mapowaniu:", df.columns.tolist())
-                st.write("DEBUG: Typ kolumny 'Linia':", type(df['Linia']))
-                st.write("DEBUG: Przykładowe wartości 'Linia':", df['Linia'].head(10))
-                st.write("DEBUG: Typ kolumny 'Stacja':", type(df['Stacja']))
-                st.write("DEBUG: Przykładowe wartości 'Stacja':", df['Stacja'].head(10))
-                st.write("DEBUG: df shape:", df.shape)
-
+                df['data_dzienna'] = pd.to_datetime(df['dispatched']).dt.date
                 df['Linia'] = df['Linia'].astype(str)
                 df['Stacja'] = df['Stacja'].astype(str)
-                df['data_dzienna'] = pd.to_datetime(df['data_dzienna']).dt.date
 
-                # Agregacja: jeden wpis na dzień, stację, linię – każda linia = awaria
-                df = df.groupby(['data_dzienna', 'Stacja', 'Linia']).size().reset_index(name='czy_wystapila_awaria')
-                df['czy_wystapila_awaria'] = 1
+                # Tworzymy pełną siatkę dat, stacji, linii
+                all_dates = pd.date_range(df['data_dzienna'].min(), df['data_dzienna'].max())
+                all_stations = df['Stacja'].unique()
+                all_lines = df['Linia'].unique()
 
-                df['data_dzienna'] = pd.to_datetime(df['data_dzienna'])
-                df = add_dynamic_features(df)
+                multi = pd.MultiIndex.from_product([all_dates, all_stations, all_lines], names=['data_dzienna', 'Stacja', 'Linia'])
+                df_full = pd.DataFrame(index=multi).reset_index()
 
-                if df.empty:
-                    raise ValueError("No valid data after processing file")
+                df_events = df.groupby(['data_dzienna', 'Stacja', 'Linia']).size().reset_index(name='awaria_event')
+                df_events['awaria_event'] = 1
 
-                jutro = datetime.now() + timedelta(days=1)
-                st.markdown(f"📅 **Prediction for tomorrow:** {jutro.strftime('%d.%m.%Y')}")
+                df_full = df_full.merge(df_events, on=['data_dzienna', 'Stacja', 'Linia'], how='left')
+                df_full['czy_wystapila_awaria'] = df_full['awaria_event'].fillna(0).astype(int)
+                df_full['data_dzienna'] = pd.to_datetime(df_full['data_dzienna'])
 
-                linie = sorted(df['Linia'].dropna().unique())
+                df_full = add_dynamic_features(df_full)
+
+                linie = sorted(df_full['Linia'].dropna().unique())
                 if not linie:
                     st.error("No valid lines in data!")
                     st.stop()
 
                 wybrana_linia = st.selectbox("🏭 Select line", linie)
 
-                df = df.dropna(subset=FEATURE_COLS)
-                X = df[FEATURE_COLS]
+                # Predykcja tylko dla najnowszego dnia
+                df_pred = df_full[df_full['data_dzienna'] == df_full['data_dzienna'].max()]
+                df_pred = df_pred[df_pred['Linia'] == wybrana_linia].drop_duplicates(subset=['Stacja'])
+                df_pred = df_pred.dropna(subset=FEATURE_COLS)
+                X = df_pred[FEATURE_COLS]
 
-                df['Predykcja awarii'] = model.predict(X)
-                df['Predykcja awarii'] = df['Predykcja awarii'].map({0: "🟢 No Failure", 1: "🔴 Failure"})
+                df_pred['Predykcja awarii'] = model.predict(X)
+                df_pred['Predykcja awarii'] = df_pred['Predykcja awarii'].map({0: "🟢 No Failure", 1: "🔴 Failure"})
 
-                df_filtered = df[df['Linia'] == wybrana_linia].drop_duplicates(subset=['Stacja'])
-                df_filtered.insert(0, "Lp.", range(1, len(df_filtered)+1))
+                df_pred.insert(0, "Lp.", range(1, len(df_pred)+1))
+
+                df_filtered = df_pred  # używamy tej zmiennej do prezentacji niżej
 
             except Exception as e:
                 st.markdown(f"""
