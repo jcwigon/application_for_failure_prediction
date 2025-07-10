@@ -187,6 +187,20 @@ else:
                 df_pred = df_full[df_full['data_dzienna'] == max_date]
                 df_pred = df_pred[df_pred['Linia'] == wybrana_linia].drop_duplicates(subset=['Stacja'])
                 df_pred = df_pred.dropna(subset=FEATURE_COLS)
+
+                # --- DEBUG START ---
+                st.write(f"Plik wejściowy: liczba rekordów = {len(df)}, unikalnych stacji = {df['Stacja'].nunique()}, unikalnych linii = {df['Linia'].nunique()}")
+                st.write("Podgląd dataframe po generowaniu pełnej siatki i dynamicznych cech:")
+                st.dataframe(df_full.head(20))
+                st.write("Podgląd cech dynamicznych (pierwsze 20):")
+                st.dataframe(df_pred[FEATURE_COLS + ['Stacja', 'Linia']].head(20))
+                st.write("Unikalne wartości cech dynamicznych w predykcji (każda cecha):")
+                for col in FEATURE_COLS:
+                    st.write(f"{col}: {df_pred[col].unique()}")
+                st.write("Podsumowanie przed predykcją:")
+                st.write(df_pred[FEATURE_COLS].describe())
+                # --- DEBUG END ---
+
                 X = df_pred[FEATURE_COLS]
 
                 df_pred['Predykcja awarii'] = model.predict(X)
@@ -235,6 +249,7 @@ if 'df_filtered' in locals():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
+
 
 
 
